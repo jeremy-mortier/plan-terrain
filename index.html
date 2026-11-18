@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Plan de terrain</title>
+<meta name="theme-color" content="#1d4e89">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="css/style.css">
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+
+<!-- ============================================================ Accueil -->
+<main id="accueil" class="accueil" hidden>
+  <header class="a-tete">
+    <div>
+      <h1>Plan de terrain</h1>
+      <p class="sous">Relevés et aménagement de terrains, sur fond du plan PICC du SPW</p>
+    </div>
+    <div class="rang">
+      <label class="btn">Importer un plan<input type="file" id="fImport" accept=".json,application/json" hidden></label>
+      <button class="btn primaire" id="bNouveau">Nouveau plan</button>
+    </div>
+  </header>
+
+  <section id="dlgNouveau" class="carte-ui nouveau" hidden>
+    <h2>Nouveau plan</h2>
+    <form id="formNouveau" autocomplete="off">
+      <div class="grille-form">
+        <label class="ch-cp">Code postal<input id="nCp" inputmode="numeric" maxlength="4" pattern="\d{4}" placeholder="7620" required></label>
+        <label class="ch-rue">Rue<input id="nRue" list="listeRues" placeholder="Rue de Tournai" disabled required></label>
+        <label class="ch-num">N°<input id="nNum" placeholder="79" disabled></label>
+        <label class="ch-nom">Nom du plan<input id="nNom" placeholder="Place Verte, Hollain"></label>
+      </div>
+      <datalist id="listeRues"></datalist>
+      <p class="aide" id="nMsg" role="status">Commencez par le code postal : les rues de la commune vous seront proposées.</p>
+      <div class="rang">
+        <button class="btn primaire" id="nCreer" type="submit">Créer le plan</button>
+        <button class="btn" id="nAnnuler" type="button">Annuler</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="plans">
+    <h2>Mes plans</h2>
+    <p class="aide" id="msgListe" role="status"></p>
+    <p class="vide" id="videPlans" hidden>Aucun plan pour l'instant. Créez-en un avec « Nouveau plan » : il suffit d'une adresse en Wallonie.</p>
+    <ul id="listePlans" class="liste-plans"></ul>
+  </section>
+  <p class="pied">Plans enregistrés sur cet appareil. Pensez à exporter les plans importants. Données © SPW – PICC.</p>
+</main>
+
+<!-- ============================================================ Plan -->
+<div id="plan" class="vue-plan" hidden>
+  <header class="p-tete">
+    <a class="btn" href="#">← Plans</a>
+    <div class="p-titre">
+      <h1 id="pNom"></h1>
+      <p id="pAdr" class="sous"></p>
+    </div>
+    <ol class="etapes" aria-label="Étapes">
+      <li><button type="button" data-etape="1"><b>1</b> Contour</button></li>
+      <li><button type="button" data-etape="2"><b>2</b> Relevé</button></li>
+      <li><button type="button" data-etape="3"><b>3</b> Aménagement</button></li>
+    </ol>
+    <div class="rang p-outils">
+      <button class="btn" id="bAnnuler" title="Annuler (Ctrl+Z)" disabled>Annuler</button>
+      <button class="btn" id="p3d" aria-pressed="false">Vue 3D</button>
+      <button class="btn" id="pImprimer">Imprimer / PDF</button>
+      <button class="btn" id="pExporter">Exporter</button>
+    </div>
+  </header>
+
+  <div class="p-corps">
+    <div class="zone-carte">
+      <svg id="carte" aria-label="Carte du terrain"></svg>
+      <div class="flottant zoom">
+        <button id="zPlus" aria-label="Zoomer">+</button>
+        <button id="zMoins" aria-label="Dézoomer">−</button>
+        <button id="zCadrer" aria-label="Recadrer" title="Recadrer">⌖</button>
+      </div>
+      <div class="flottant nord" aria-label="Nord en haut">▲<br>N</div>
+      <div class="flottant echelle"><span id="echTxt">10 m</span><i id="echBarre"></i></div>
+      <div class="flottant survol" id="infoSurvol" hidden></div>
+      <div class="flottant attrib">© <a href="https://geoportail.wallonie.be" target="_blank" rel="noopener">SPW</a> – PICC</div>
+      <div id="vue3d" class="vue3d" hidden>
+        <div class="v3-outils">
+          <button class="btn petit" type="button" data-vue="oblique">Vue d'ensemble</button>
+          <button class="btn petit" type="button" data-vue="dessus">Vue de dessus</button>
+          <button class="btn petit" type="button" data-vue="pieton">À hauteur d'homme</button>
+          <button class="btn petit primaire" type="button" id="v3Fermer">Revenir au plan</button>
+        </div>
+        <p class="v3-aide" id="v3Msg">Glissez pour tourner, pincez ou molette pour zoomer, deux doigts ou clic droit pour vous déplacer, double-touchez pour vous approcher. Terrain supposé plat ; bâtiments voisins à 6 m par défaut.</p>
+      </div>
+    </div>
+
+    <aside class="panneau">
+      <!-- Mesure par deux distances (contour ou élément) -->
+      <section class="carte-ui mesure" id="sMesure" hidden>
+        <div class="rang entre">
+          <h2>Mesure au mètre</h2>
+          <span class="pastille" id="mProg"></span>
+        </div>
+        <p class="m-titre"><b id="mTitre"></b> <span id="mSous"></span></p>
+        <p class="aide" id="mAide"></p>
+        <div class="repere" data-r="0">
+          <div class="rang entre"><span><i class="badge">A</i> <span id="mLib0"></span></span><button class="btn petit" id="mChg0" type="button">Changer</button></div>
+          <label>Distance mesurée depuis A (m)<input id="mD0" inputmode="decimal" autocomplete="off"></label>
+        </div>
+        <div class="repere" data-r="1">
+          <div class="rang entre"><span><i class="badge">B</i> <span id="mLib1"></span></span><button class="btn petit" id="mChg1" type="button">Changer</button></div>
+          <label>Distance mesurée depuis B (m)<input id="mD1" inputmode="decimal" autocomplete="off"></label>
+        </div>
+        <p class="m-res" id="mRes" role="status"></p>
+        <p class="alerte" id="mAlerte" hidden></p>
+        <div class="rang">
+          <button class="btn primaire" id="mOk" type="button" disabled>Valider ce point</button>
+          <button class="btn" id="mPasser" type="button">Garder la position estimée</button>
+          <button class="btn" id="mAnnuler" type="button">Arrêter</button>
+        </div>
+      </section>
+
+      <!-- Retrait d'éléments du plan SPW qui n'existent plus -->
+      <section class="carte-ui mesure" id="sRetrait" hidden>
+        <div class="rang entre">
+          <h2>Élément disparu</h2>
+          <button class="btn petit primaire" type="button" id="rtFin">Terminer</button>
+        </div>
+        <p class="aide" id="rtAide"></p>
+        <div class="r-form" id="rtSel" hidden>
+          <p class="m-titre"><b id="rtNom"></b></p>
+          <p class="aide" id="rtInfo"></p>
+          <div class="rang"><button class="btn primaire" type="button" id="rtRetirer">Retirer du plan</button></div>
+        </div>
+      </section>
+
+      <!-- Étape 2 : relevé des éléments fixes -->
+      <section class="carte-ui" id="sReleve" hidden>
+        <div class="rang entre">
+          <h2>Éléments fixes</h2>
+          <span class="pastille" id="rEtat"></span>
+        </div>
+        <p class="aide" id="rAide"></p>
+        <div class="r-form" id="rForm" hidden>
+          <div class="choix" id="rTypes" role="group" aria-label="Type d'élément"></div>
+          <div class="choix" id="rFormes" role="group" aria-label="Forme"></div>
+          <label>Nom<input id="rNom" autocomplete="off"></label>
+          <div class="grille-attr" id="rAttrs"></div>
+          <p class="aide" id="rPts"></p>
+          <div class="rang" id="rBoutonsNouveau">
+            <button class="btn primaire" id="rMesurer" type="button">Mesurer la position</button>
+            <button class="btn" id="rSansMesure" type="button">Enregistrer sans mesurer</button>
+            <button class="btn" id="rRetirerPt" type="button">Retirer le dernier point</button>
+            <button class="btn" id="rAnnulerForm" type="button">Annuler</button>
+          </div>
+          <div class="rang" id="rBoutonsSel">
+            <button class="btn primaire" id="rRemesurer" type="button">Remesurer</button>
+            <button class="btn" id="rFermerSel" type="button">Fermer</button>
+            <button class="btn petit danger" id="rSupprimer" type="button">Supprimer</button>
+          </div>
+        </div>
+        <ul class="liste-el" id="rListe"></ul>
+        <button class="btn petit" type="button" data-retrait>Un élément du plan SPW n'existe plus ?</button>
+      </section>
+
+      <!-- Étape 3 : aménagement -->
+      <section class="carte-ui" id="sAmenag" hidden>
+        <div class="rang entre">
+          <h2>Aménagement</h2>
+          <span class="pastille" id="aEtat"></span>
+        </div>
+        <p class="aide" id="aAide"></p>
+        <div class="r-form" id="aFiche" hidden>
+          <label>Nom<input id="aNom" autocomplete="off"></label>
+          <div class="grille-attr">
+            <label>Largeur (m)<input id="aW" inputmode="decimal" autocomplete="off"></label>
+            <label>Longueur (m)<input id="aL" inputmode="decimal" autocomplete="off"></label>
+            <label>Hauteur (m)<input id="aH" inputmode="decimal" autocomplete="off"></label>
+            <label>Catégorie<select id="aCat"></select></label>
+          </div>
+          <div class="tente-opts" id="aTente" hidden>
+            <label>Toile<select id="aToile"><option value="blanc">Blanche</option><option value="raye">Rayée rouge et blanc</option></select></label>
+            <label class="coche"><input type="checkbox" id="aCotes"> Côtés fermés</label>
+            <label class="coche"><input type="checkbox" id="aPlancherT"> Plancher</label>
+          </div>
+          <div class="marche" id="aMarche" hidden>
+            <p class="aide" id="aMarcheTxt"></p>
+          </div>
+          <div class="distances">
+            <div class="rang entre">
+              <span class="aide">Éléments proches</span>
+              <label class="coche">jusqu'à <select id="aPortee" style="width:auto;min-height:30px"><option value="2">2 m</option><option value="5" selected>5 m</option><option value="10">10 m</option></select></label>
+            </div>
+            <ul id="aDist"></ul>
+          </div>
+          <div class="rotation">
+            <label>Rotation (degrés, sens horaire)<input id="aRot" inputmode="decimal" autocomplete="off"></label>
+            <div class="rang crans">
+              <button class="btn" type="button" data-rot="-15">−15°</button>
+              <button class="btn" type="button" data-rot="-1">−1°</button>
+              <button class="btn" type="button" data-rot="1">+1°</button>
+              <button class="btn" type="button" data-rot="15">+15°</button>
+            </div>
+            <div class="rang">
+              <button class="btn petit" type="button" id="aRot0">Remettre à 0°</button>
+              <button class="btn petit" type="button" data-rot="90">Pivoter de 90°</button>
+              <button class="btn petit" type="button" id="aAligner" aria-pressed="false">Aligner sur…</button>
+            </div>
+          </div>
+          <div class="rang">
+            <button class="btn" type="button" id="aDup">Dupliquer</button>
+            <button class="btn" type="button" id="aFermer">Fermer</button>
+            <button class="btn petit danger" type="button" id="aSuppr">Supprimer</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="carte-ui" id="sAlertes" hidden>
+        <div class="rang entre">
+          <h2>Points d'attention</h2>
+          <span class="pastille" id="aNbAlertes"></span>
+        </div>
+        <ul class="alertes" id="aAlertes"></ul>
+      </section>
+
+      <section class="carte-ui" id="sCatalogue" hidden>
+        <h2>Catalogue</h2>
+        <p class="aide">Touchez un élément : il se pose au centre de la carte.</p>
+        <div class="catalogue" id="aCatalogue"></div>
+        <details class="perso" id="aPerso">
+          <summary>Créer un élément sur mesure</summary>
+          <form id="aFormPerso" class="r-form" autocomplete="off">
+            <label>Nom<input id="kNom" required placeholder="Château gonflable"></label>
+            <div class="grille-attr">
+              <label>Largeur (m)<input id="kW" inputmode="decimal" required placeholder="5"></label>
+              <label>Longueur (m)<input id="kL" inputmode="decimal" required placeholder="6"></label>
+              <label>Hauteur (m)<input id="kH" inputmode="decimal" placeholder="facultatif"></label>
+              <label>Catégorie<select id="kCat"></select></label>
+            </div>
+            <label class="coche"><input type="checkbox" id="kGarder" checked> Garder dans mon catalogue</label>
+            <div class="rang"><button class="btn primaire" type="submit">Poser sur le plan</button></div>
+            <p class="aide" id="kMsg" role="status"></p>
+          </form>
+        </details>
+      </section>
+
+      <section class="carte-ui" id="sMateriel" hidden>
+        <h2>Liste du matériel</h2>
+        <table class="materiel">
+          <thead><tr><th>Élément</th><th class="n">Nb</th><th class="n">m²</th></tr></thead>
+          <tbody id="aMateriel"></tbody>
+        </table>
+        <dl class="chiffres">
+          <dt>Terrain</dt><dd id="aSurfTerrain">–</dd>
+          <dt>Occupé (hors zones)</dt><dd id="aSurfOcc">–</dd>
+          <dt>Reste libre</dt><dd class="grand" id="aSurfLibre">–</dd>
+        </dl>
+      </section>
+
+      <section class="carte-ui" id="sContour">
+        <div class="rang entre">
+          <h2>Contour du terrain</h2>
+          <span class="pastille" id="cEtat">À tracer</span>
+        </div>
+        <p class="aide" id="cAide"></p>
+        <p class="alerte" id="cAlerte" hidden>Le contour se recoupe lui-même. Déplacez les points pour corriger avant de valider.</p>
+        <div class="rang">
+          <button class="btn primaire" id="cTracer" aria-pressed="false">Commencer le tracé</button>
+          <button class="btn" id="cRetirer" hidden>Retirer le dernier point</button>
+          <button class="btn" id="cFermer" hidden>Fermer le contour</button>
+          <button class="btn primaire" id="cValider" hidden>Valider le contour</button>
+          <button class="btn" id="cRouvrir" hidden>Modifier le contour</button>
+        </div>
+        <div class="sel" id="cSel" hidden>
+          <span id="cSelTxt"></span>
+          <span class="rang">
+            <button class="btn petit" id="cMesurer">Placer par deux mesures</button>
+            <button class="btn petit danger" id="cSuppr">Supprimer ce point</button>
+          </span>
+        </div>
+        <dl class="chiffres">
+          <dt>Surface</dt><dd class="grand" id="sSurface">–</dd>
+          <dt>Périmètre</dt><dd id="sPerim">–</dd>
+          <dt>Points</dt><dd id="sPoints">–</dd>
+        </dl>
+        <div class="rang entre">
+          <label class="coche"><input type="checkbox" id="cAimant" checked> Aimant sur le plan SPW</label>
+          <button class="btn petit danger" id="cEffacer" hidden>Tout effacer</button>
+        </div>
+      </section>
+
+      <section class="carte-ui">
+        <h2>Plan SPW</h2>
+        <ul class="legende" id="legende"></ul>
+        <p class="aide" id="piccDate"></p>
+        <details class="perso" id="rtRetires" hidden>
+          <summary id="rtResume"></summary>
+          <ul class="liste-el" id="rtListe"></ul>
+        </details>
+        <div class="rang">
+          <button class="btn petit" type="button" data-retrait>Retirer un élément disparu</button>
+          <button class="btn petit" id="bRecharger">Recharger les données SPW</button>
+        </div>
+      </section>
+      <p class="aide etat-sauve" id="etatSauve" role="status"></p>
+    </aside>
+  </div>
+</div>
+
+<!-- ============================================================ Impression -->
+<dialog id="dlgImpression" class="dlg">
+  <form method="dialog" class="dlg-corps" id="formImpression">
+    <h2>Imprimer ou enregistrer en PDF</h2>
+    <div class="grille-attr">
+      <label>Orientation<select id="iOrientation"><option value="paysage">A4 paysage</option><option value="portrait">A4 portrait</option></select></label>
+      <label>Échelle<select id="iEchelle"><option value="auto">Automatique</option><option value="200">1:200</option><option value="250">1:250</option><option value="500">1:500</option><option value="1000">1:1000</option></select></label>
+    </div>
+    <fieldset class="coches">
+      <legend>Contenu</legend>
+      <label class="coche"><input type="checkbox" id="iFond" checked> Plan SPW en fond</label>
+      <label class="coche"><input type="checkbox" id="iCotes" checked> Longueurs des côtés du terrain</label>
+      <label class="coche"><input type="checkbox" id="iReleve" checked> Éléments relevés</label>
+      <label class="coche"><input type="checkbox" id="iAmenag" checked> Aménagement</label>
+      <label class="coche"><input type="checkbox" id="iListes" checked> Listes (matériel, points d'attention, éléments) sur une 2e page</label>
+    </fieldset>
+    <p class="aide" id="iInfo"></p>
+    <p class="aide">Dans la fenêtre d'impression, choisissez « Enregistrer au format PDF » comme imprimante pour obtenir un fichier.</p>
+    <div class="rang">
+      <button class="btn primaire" id="iLancer" value="ok">Imprimer…</button>
+      <button class="btn" value="annuler">Annuler</button>
+    </div>
+  </form>
+</dialog>
+<div id="impression" aria-hidden="true"></div>
+<style id="stylePage">@page { size: A4 landscape; margin: 10mm; }</style>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
