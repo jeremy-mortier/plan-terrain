@@ -120,7 +120,8 @@ export class Carte {
     this.gElements.replaceChildren();
     elements.forEach((e, i) => {
       const mesure = e.points.every((p) => p.src === 'mesure');
-      dessinerElement(e, el('g', { class: `el el-${e.type} ${mesure ? 'mesure' : 'estime'}${i === sel ? ' sel' : ''}` }, this.gElements));
+      const place = !mesure && e.points.every((p) => p.src === 'mesure' || p.src === 'place');
+      dessinerElement(e, el('g', { class: `el el-${e.type} ${mesure ? 'mesure' : place ? 'place' : 'estime'}${i === sel ? ' sel' : ''}` }, this.gElements));
     });
     this.dessinerOverlay();
   }
@@ -248,22 +249,39 @@ export class Carte {
 
   // Élément sous un point de l'écran (index ou -1)
   elementSous(sx, sy, e) {
-    const r = this.rayon(e), m = this.versMonde(sx, sy), s = this.vue.s;
+    const r = this.rayon(e), m = this.versMonde(sx, sy);
     let best = -1, bd = r;
     this.elements.forEach((el, i) => {
-      const pts = el.points;
-      let d = Infinity;
-      if (el.forme === 'point') {
-        const rayon = el.type === 'arbre' ? (valeur(el, 'couronne') || 0) / 2 : (valeur(el, 'largeur') || 0) / 2;
-        d = Math.max(0, dist(pts[0], m) - rayon) * s;
-      } else {
-        const n = el.forme === 'surface' ? pts.length : pts.length - 1;
-        for (let k = 0; k < n; k++) d = Math.min(d, dist(projSeg(m, pts[k], pts[(k + 1) % pts.length]), m) * s);
-        if (el.forme === 'surface' && dedans(m, pts)) d = 0;
-      }
+      const d = this.distanceEcran(el, m);
       if (d < bd) { bd = d; best = i; }
     });
     return best;
+  }
+
+  // Distance à l'écran (px) entre un point du monde et un élément relevé (0 = dessus)
+  distanceEcran(el, m) {
+    const pts = el.points, s = this.vue.s;
+    if (!pts.length) return Infinity;
+    if (el.forme === 'point') {
+      const rayon = el.type === 'arbre' ? (valeur(el, 'couronne') || 4) / 2 : (valeur(el, 'largeur') || 0.5) / 2;
+      return Math.max(0, dist(pts[0], m) - rayon) * s;
+    }
+    if (pts.length === 1) return dist(pts[0], m) * s;
+    let d = Infinity;
+    const n = el.forme === 'surface' ? pts.length : pts.length - 1;
+    for (let k = 0; k < n; k++) d = Math.min(d, dist(projSeg(m, pts[k], pts[(k + 1) % pts.length]), m) * s);
+    if (el.forme === 'surface' && dedans(m, pts)) d = 0;
+    return d;
+  }
+
+  // Élément relevé qu'on peut faire glisser sous le doigt : celui en cours de saisie ou celui sélectionné
+  cibleGlisser(p, e) {
+    if (!this.glisserElements) return null;
+    const m = this.versMonde(p.x, p.y), r = this.rayon(e);
+    if (this.brouillon && this.distanceEcran(this.brouillon, m) < r) return 'brouillon';
+    const el = this.elements[this.selEl];
+    if (el && this.distanceEcran(el, m) < r) return this.selEl;
+    return null;
   }
 
   setMode(mode) {
@@ -399,6 +417,10 @@ export class Carte {
       return;
     }
     if (this.pointeurs.size > 2) return;
+    if (this.mode === 'releve' && !this.mesure) {
+      const cible = this.cibleGlisser(p, e);
+      if (cible != null) { this.geste = { type: 'element', cible, depart: p, dernier: this.versMonde(p.x, p.y), bouge: false }; return; }
+    }
     if (this.mode === 'amenager' && !this.alignement) {
       const o = this.objets[this.selObj];
       if (o) {
@@ -457,6 +479,17 @@ export class Carte {
       } else if (e.pointerType !== 'mouse' && (this.mode === 'tracer' || this.mode === 'releve')) {
         this.setSurvol(this.accrocher(p.x, p.y, e));
       }
+    } else if (g.type === 'element') {
+      if (!g.bouge && Math.hypot(p.x - g.depart.x, p.y - g.depart.y) > 5) { g.bouge = true; this.onElement?.('debut', g.cible); }
+      if (g.bouge) {
+        const m = this.versMonde(p.x, p.y), dx = m.x - g.dernier.x, dy = m.y - g.dernier.y;
+        g.dernier = m;
+        const el = g.cible === 'brouillon' ? this.brouillon : this.elements[g.cible];
+        for (const q of el.points) { q.x = Math.round((q.x + dx) * 1000) / 1000; q.y = Math.round((q.y + dy) * 1000) / 1000; }
+        if (g.cible === 'brouillon') this.setBrouillon(this.brouillon);
+        else this.setElements(this.elements, this.selEl);
+        this.onElement?.('bouge', g.cible);
+      }
     } else if (g.type === 'objet') {
       if (!g.bouge && Math.hypot(p.x - g.depart.x, p.y - g.depart.y) > 4) { g.bouge = true; this.onObjet?.('debut', g.i); }
       if (g.bouge) {
@@ -498,6 +531,10 @@ export class Carte {
     if (annule) return;
     if (g.type === 'pan' && !g.bouge) this.tap(p, e);
     if ((g.type === 'objet' || g.type === 'rotation') && g.bouge) this.onObjet?.('fin', g.i);
+    if (g.type === 'element') {
+      if (g.bouge) this.onElement?.('fin', g.cible);
+      else this.tap(p, e);   // simple touche : comportement habituel (sélection, point suivant…)
+    }
     if (g.type === 'sommet') {
       if (g.bouge) this.onContour?.(this.contour);
       else { this.selection = g.i; this.dessinerContour(); this.onContour?.(this.contour, true); }
@@ -641,7 +678,23 @@ export class Carte {
     const ob = this.objets[this.selObj];
     // distances aux éléments proches (calculées par l'application)
     this.distances = ob && this.calculDistances ? this.calculDistances(ob) : [];
-    for (const r of this.distances) {
+    this.dessinerDistances(o, this.distances);
+    if (ob && !this.alignement) {
+      const h = this.poignee(ob);
+      el('line', { x1: h.bout.x, y1: h.bout.y, x2: h.x, y2: h.y, class: 'rot-ligne' }, o);
+      el('circle', { cx: h.x, cy: h.y, r: 8, class: 'rot-poignee' }, o);
+      const lab = el('text', { x: h.x + 14, y: h.y + 4, class: 'rot-txt' }, o);
+      lab.textContent = `${fmtNb(ob.rot)}°`;
+    }
+    if (this.alignement && this.segSurvol) {
+      const [a, b] = this.segSurvol.map((p) => this.versEcran(p));
+      el('line', { x1: a.x, y1: a.y, x2: b.x, y2: b.y, class: 'seg-vise' }, o);
+    }
+  }
+
+  // Traits de distance vers les éléments proches, avec la valeur
+  dessinerDistances(o, liste) {
+    for (const r of liste) {
       const p = this.versEcran(r.p), q = this.versEcran(r.q);
       const L = Math.hypot(q.x - p.x, q.y - p.y);
       el('line', { x1: p.x, y1: p.y, x2: q.x, y2: q.y, class: 'dist-ligne' }, o);
@@ -658,21 +711,14 @@ export class Carte {
       const t = el('text', { class: 'dist-txt', transform: `translate(${(p.x + q.x) / 2},${(p.y + q.y) / 2}) rotate(${ang}) translate(0,-4)` }, o);
       t.textContent = txt;
     }
-    if (ob && !this.alignement) {
-      const h = this.poignee(ob);
-      el('line', { x1: h.bout.x, y1: h.bout.y, x2: h.x, y2: h.y, class: 'rot-ligne' }, o);
-      el('circle', { cx: h.x, cy: h.y, r: 8, class: 'rot-poignee' }, o);
-      const lab = el('text', { x: h.x + 14, y: h.y + 4, class: 'rot-txt' }, o);
-      lab.textContent = `${fmtNb(ob.rot)}°`;
-    }
-    if (this.alignement && this.segSurvol) {
-      const [a, b] = this.segSurvol.map((p) => this.versEcran(p));
-      el('line', { x1: a.x, y1: a.y, x2: b.x, y2: b.y, class: 'seg-vise' }, o);
-    }
   }
 
   // Poignées de l'élément sélectionné / en saisie, repères et cercles de mesure
   dessinerReleve(o) {
+    // distances en direct depuis l'élément en saisie ou sélectionné (sauf pendant une mesure)
+    const cibleDist = this.brouillon?.points.length ? this.brouillon : this.elements[this.selEl];
+    this.distancesEl = cibleDist && !this.mesure && this.glisserElements && this.calculDistancesEl ? this.calculDistancesEl(cibleDist) : [];
+    this.dessinerDistances(o, this.distancesEl);
     const poignees = (e, cls) => e.points.forEach((p) => {
       const q = this.versEcran(p);
       el('circle', { cx: q.x, cy: q.y, r: 5, class: `sommet ${cls} src-${p.src || 'libre'}` }, o);

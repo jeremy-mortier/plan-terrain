@@ -2,7 +2,7 @@
 // Repère Three.js : x vers l'est, y vers le haut, z vers le sud (z = -nord).
 
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { MapControls } from 'three/addons/controls/MapControls.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { coins, hauteur, estMarche, travees, estRemorque, TIMON } from './amenagement.js';
 import { valeur } from './releve.js';
@@ -508,11 +508,39 @@ export function ouvrir(conteneur, plan) {
   const tailleTerrain = pts.length ? Math.max(...pts.map((p) => Math.hypot(p.x - c.x, p.y - c.y))) : 40;
   const D = Math.max(tailleTerrain * 2.2, 30);
   const camera = new THREE.PerspectiveCamera(50, largeur() / hauteurEcran(), 0.1, 1000);
-  const ctrl = new OrbitControls(camera, rendu.domElement);
+  // Commandes façon carte : glisser (1 doigt / clic gauche) = se déplacer sur le sol,
+  // 2 doigts / clic droit = tourner et incliner, molette / pincer = zoomer vers l'endroit visé
+  const ctrl = new MapControls(camera, rendu.domElement);
   ctrl.enableDamping = true;
+  ctrl.dampingFactor = 0.12;
+  ctrl.zoomToCursor = true;
   ctrl.maxPolarAngle = Math.PI / 2 - 0.03;
-  ctrl.minDistance = 2;
+  ctrl.minDistance = 1;
   ctrl.maxDistance = 400;
+
+  // Déplacements au clavier ou aux boutons : avancer / reculer / gauche / droite dans le sens du regard
+  const avant = new THREE.Vector3(), droite = new THREE.Vector3(), haut = new THREE.Vector3(0, 1, 0);
+  function deplacer(av, dr) {
+    const d = Math.max(camera.position.distanceTo(ctrl.target) * 0.06, 0.4);   // pas proportionnel au zoom
+    avant.subVectors(ctrl.target, camera.position).setY(0).normalize();
+    droite.crossVectors(avant, haut).normalize();
+    const v = avant.multiplyScalar(av * d).add(droite.multiplyScalar(dr * d));
+    camera.position.add(v);
+    ctrl.target.add(v);
+    ctrl.update();
+  }
+  function tourner(degres) {
+    const off = camera.position.clone().sub(ctrl.target);
+    off.applyAxisAngle(haut, degres * Math.PI / 180);
+    camera.position.copy(ctrl.target).add(off);
+    ctrl.update();
+  }
+  function zoomer(f) {
+    const off = camera.position.clone().sub(ctrl.target);
+    const L = Math.min(Math.max(off.length() * f, ctrl.minDistance), ctrl.maxDistance);
+    camera.position.copy(ctrl.target).add(off.setLength(L));
+    ctrl.update();
+  }
 
   function pointDeVue(nom) {
     if (nom === 'dessus') { camera.position.set(0, D * 1.25, 0.01); ctrl.target.set(0, 0, 0); }
@@ -558,7 +586,7 @@ export function ouvrir(conteneur, plan) {
   ro.observe(conteneur);
 
   return {
-    pointDeVue,
+    pointDeVue, deplacer, tourner, zoomer,
     fermer() {
       actif = false;
       ro.disconnect();

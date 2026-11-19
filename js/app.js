@@ -232,6 +232,8 @@ function majSections() {
   for (const [n, ids] of Object.entries(SECTIONS)) for (const id of ids) $(`#${id}`).hidden = plein || +n !== etape;
   $('#sMesure').hidden = !M;
   $('#sRetrait').hidden = !RT.actif || !!M;
+  carte.glisserElements = etape === 2 && !RT.actif && !M;
+  if (plan) majSuite();
 }
 
 function allerEtape(n) {
@@ -369,6 +371,8 @@ $('#cAimant').onchange = (e) => { carte.aimant = e.target.checked; };
 // ---------------------------------------------------------------- Relevé des éléments
 const pt = (a) => ({ x: a.x, y: a.y, src: 'estime' });
 const estMesure = (e) => e.points.every((p) => p.src === 'mesure');
+const estPlace = (e) => !estMesure(e) && e.points.every((p) => p.src === 'mesure' || p.src === 'place');
+const etatEl = (e) => (estMesure(e) ? 'mesuré' : estPlace(e) ? 'placé' : 'estimé');
 
 function tapReleve(a, p, e) {
   if (M) { if (M.choix != null) choisirRepereSur(a, p, e); return; }
@@ -383,12 +387,30 @@ function tapReleve(a, p, e) {
   }
   const i = carte.elementSous(p.x, p.y, e);
   if (i >= 0) { selectionner(i); return; }
-  if (R.sel >= 0) { selectionner(-1); return; } // une touche dans le vide ferme d'abord la fiche
+  if (R.sel >= 0) { R.sel = -1; carte.setElements(plan.elements, -1); } // ferme la fiche ouverte et pose directement
   const type = R.dernierType || 'arbre';
   R.brouillon = { type, forme: rel.TYPES[type].forme || R.derniereForme || 'point', nom: '', attrs: {}, points: [pt(a)] };
   carte.setBrouillon(R.brouillon);
   majReleve(true);
 }
+
+// Sur téléphone, le panneau est sous la carte : un bouton sur la carte y emmène
+function majSuite() {
+  const b = $('#suite');
+  let txt = '', cible = null;
+  if (M) { txt = 'Saisir les distances ↓'; cible = '#sMesure'; }
+  else if (RT.actif && RT.sel >= 0) { txt = 'Retirer cet élément ↓'; cible = '#sRetrait'; }
+  else if (etape === 2 && R.brouillon) { txt = `${rel.TYPES[R.brouillon.type].lib} posé · compléter la fiche ↓`; cible = '#rForm'; }
+  else if (etape === 2 && R.sel >= 0) { txt = 'Voir la fiche ↓'; cible = '#rForm'; }
+  else if (etape === 3 && A.sel >= 0) { txt = 'Voir la fiche ↓'; cible = '#aFiche'; }
+  b.hidden = !txt;
+  b.textContent = txt;
+  b.dataset.cible = cible || '';
+}
+$('#suite').onclick = () => {
+  const c = $('#suite').dataset.cible;
+  if (c) $(c).scrollIntoView({ behavior: 'smooth', block: 'start' });
+};
 
 // Haie ou muret droit dont la longueur est connue : la fin est placée à cette distance du début,
 // dans la direction indiquée sur la carte
@@ -434,6 +456,7 @@ function resume(e) {
 // Panneau du relevé ; « refaire » reconstruit le formulaire (nouvel objet affiché)
 function majReleve(refaire = false) {
   if (!plan) return;
+  majSuite();
   const els = plan.elements, b = R.brouillon, sel = R.sel >= 0 ? els[R.sel] : null;
   const nMes = els.filter(estMesure).length;
   $('#rEtat').textContent = els.length ? `${nMes} mesuré${nMes > 1 ? 's' : ''} sur ${els.length}` : 'Aucun élément';
@@ -459,13 +482,16 @@ function majReleve(refaire = false) {
   } else if (sel) {
     const nm = sel.points.filter((p) => p.src === 'mesure').length;
     $('#rAide').textContent = '';
-    $('#rPts').textContent = estMesure(sel) ? 'Position mesurée sur place.' : `Position estimée (${nm} point${nm > 1 ? 's' : ''} mesuré${nm > 1 ? 's' : ''} sur ${sel.points.length}). Utilisez « Remesurer » sur place.`;
+    $('#rPts').textContent = estMesure(sel) ? 'Position mesurée sur place. Glissez-le sur la carte pour le déplacer.'
+      : estPlace(sel) ? 'Placé à la main avec les distances. Glissez-le pour l’ajuster, ou « Mesurer la position » depuis deux repères.'
+        : `Position estimée (${nm} point${nm > 1 ? 's' : ''} mesuré${nm > 1 ? 's' : ''} sur ${sel.points.length}). Glissez-le sur la carte en suivant les distances, ou utilisez « Mesurer la position ».`;
     $('#rRemesurer').textContent = estMesure(sel) ? 'Remesurer' : 'Mesurer la position';
   } else {
     $('#rAide').textContent = "Touchez la carte à l'endroit approximatif d'un élément (arbre, haie, muret…) pour l'ajouter. L'application vous proposera deux repères depuis lesquels mesurer. Touchez un élément existant pour l'ouvrir."
       + (plan.contour.valide ? '' : ' Le contour n’est pas encore validé.');
   }
   if (obj && refaire) remplirForm(obj, !!b);
+  if (obj) majDistances(carte.distancesEl, '#rDist', '#rPortee');
   // liste
   const ul = $('#rListe');
   ul.replaceChildren();
@@ -474,7 +500,7 @@ function majReleve(refaire = false) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'el-ligne' + (i === R.sel ? ' sel' : '');
-    btn.innerHTML = `<i class="pastille-el t-${e.type}"></i><span class="el-txt"><b></b><small></small></span><span class="pastille ${estMesure(e) ? 'ok' : 'attention'}">${estMesure(e) ? 'mesuré' : 'estimé'}</span>`;
+    btn.innerHTML = `<i class="pastille-el t-${e.type}"></i><span class="el-txt"><b></b><small></small></span><span class="pastille ${estMesure(e) ? 'ok' : estPlace(e) ? '' : 'attention'}">${etatEl(e)}</span>`;
     btn.querySelector('b').textContent = e.nom;
     btn.querySelector('small').textContent = resume(e) || rel.TYPES[e.type].lib;
     btn.onclick = () => { selectionner(i === R.sel ? -1 : i); if (i !== R.sel) return; centrerSur(e); };
@@ -843,9 +869,26 @@ $('#aFormPerso').addEventListener('submit', (ev) => {
 
 // Distances en direct : la carte les calcule en dessinant, la fiche les liste
 carte.calculDistances = (o) => am.distancesProches(plan, o, +$('#aPortee').value);
-function majDistances() {
-  const l = carte.distances || [];
-  const ul = $('#aDist');
+carte.calculDistancesEl = (e) => am.distancesElement(plan, e, +$('#rPortee').value);
+$('#rPortee').onchange = () => { carte.dessinerOverlay(); majDistances(carte.distancesEl, '#rDist', '#rPortee'); };
+
+// Glisser un élément relevé (en saisie ou sélectionné) : il devient « placé à la main »
+carte.onElement = (evt, cible) => {
+  const el = cible === 'brouillon' ? R.brouillon : plan.elements[cible];
+  if (!el) return;
+  if (evt === 'debut' && cible !== 'brouillon') pousserHisto();
+  else if (evt === 'bouge') majDistances(carte.distancesEl, '#rDist', '#rPortee');
+  else if (evt === 'fin') {
+    el.points.forEach((p) => { p.src = 'place'; delete p.mesure; });
+    if (cible === 'brouillon') carte.setBrouillon(el);
+    else { carte.setElements(plan.elements, R.sel); sauver(); }
+    majReleve();
+  }
+};
+
+function majDistances(liste = carte.distances, ulSel = '#aDist', porteeSel = '#aPortee') {
+  const l = liste || [];
+  const ul = $(ulSel);
   ul.replaceChildren(...l.map((r) => {
     const li = document.createElement('li');
     li.innerHTML = '<span></span><b></b>';
@@ -853,7 +896,7 @@ function majDistances() {
     li.querySelector('b').textContent = fmtM(r.d, 2);
     return li;
   }));
-  if (!l.length) ul.innerHTML = `<li><span class="aide">Rien à moins de ${$('#aPortee').value} m.</span></li>`;
+  if (!l.length) ul.innerHTML = `<li><span class="aide">Rien à moins de ${$(porteeSel).value} m.</span></li>`;
 }
 $('#aPortee').onchange = () => { carte.dessinerOverlay(); majDistances(); };
 
@@ -890,6 +933,7 @@ function finAlignement() {
 
 function majAmenag(refaire = false) {
   if (!plan) return;
+  majSuite();
   const items = plan.amenagement;
   const { liste, mauvais } = am.alertes(plan);
   carte.setAmenagement(items, A.sel, mauvais);
@@ -1120,6 +1164,7 @@ function tapRetrait(p, e) {
   majRetrait(RT.sel < 0);
 }
 function majRetrait(rien = false) {
+  majSuite();
   const o = plan.picc.objets[RT.sel];
   $('#rtAide').textContent = o
     ? "Vérifiez que c'est bien l'élément surligné en rouge. S'il est fait de plusieurs morceaux, retirez-les un par un."
@@ -1329,6 +1374,35 @@ function fermer3D() {
 $('#p3d').onclick = () => (vue3d || !$('#vue3d').hidden ? fermer3D() : ouvrir3D());
 $('#v3Fermer').onclick = fermer3D;
 document.querySelectorAll('#vue3d [data-vue]').forEach((b) => { b.onclick = () => vue3d?.pointDeVue(b.dataset.vue); });
+
+// Navigation 3D : flèches à l'écran (maintenir pour continuer) et clavier
+const NAV = {
+  av: (v) => v.deplacer(1, 0), ar: (v) => v.deplacer(-1, 0), g: (v) => v.deplacer(0, -1), d: (v) => v.deplacer(0, 1),
+  tg: (v) => v.tourner(4), td: (v) => v.tourner(-4), zp: (v) => v.zoomer(0.9), zm: (v) => v.zoomer(1 / 0.9),
+};
+let navMinuterie = null;
+const arreterNav = () => { clearInterval(navMinuterie); navMinuterie = null; };
+document.querySelectorAll('#vue3d [data-nav]').forEach((b) => {
+  b.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    if (!vue3d) return;
+    const f = NAV[b.dataset.nav];
+    f(vue3d);
+    arreterNav();
+    navMinuterie = setInterval(() => (vue3d ? f(vue3d) : arreterNav()), 60);
+  });
+  for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) b.addEventListener(ev, arreterNav);
+  b.addEventListener('contextmenu', (e) => e.preventDefault());
+});
+const TOUCHES_3D = { ArrowUp: 'av', ArrowDown: 'ar', ArrowLeft: 'g', ArrowRight: 'd', z: 'av', s: 'ar', q: 'tg', e: 'td', '+': 'zp', '=': 'zp', '-': 'zm' };
+document.addEventListener('keydown', (e) => {
+  if (!vue3d || e.ctrlKey || e.metaKey || e.altKey || e.target.matches?.('input, textarea, select')) return;
+  const k = TOUCHES_3D[e.key.length === 1 ? e.key.toLowerCase() : e.key];
+  if (!k) return;
+  e.preventDefault();
+  e.stopImmediatePropagation(); // en 3D, les flèches ne doivent pas tourner l'élément sélectionné
+  NAV[k](vue3d);
+}, true);
 
 // ---------------------------------------------------------------- Impression / PDF
 const optsImpression = () => ({

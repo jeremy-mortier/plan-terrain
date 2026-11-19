@@ -246,38 +246,68 @@ const LIB_PICC = {
 // Éléments à moins de `portee` mètres de l'objet o : un trait par élément, du plus proche au plus loin.
 // Renvoie [{ p (sur l'objet), q (sur l'élément), d, lib }]
 export function distancesProches(plan, o, portee = 5, max = 10) {
-  const R = coins(o), aretes = R.map((p, i) => [p, R[(i + 1) % 4]]);
-  const [x0, y0, x1, y1] = boite(R, portee + 1);
+  const R = coins(o);
+  return distancesDepuis(plan, { aretes: R.map((p, i) => [p, R[(i + 1) % 4]]), poly: R, marge: 0 }, { am: o.id }, portee, max);
+}
+
+const anneau = (pts, ferme) => pts.slice(0, ferme ? pts.length : pts.length - 1).map((p, i) => [p, pts[(i + 1) % pts.length]]);
+
+// Même chose pour un élément relevé (arbre, haie, muret, autre) : la forme est son tronc, son axe
+// (moins la demi-épaisseur) ou son contour
+export function distancesElement(plan, e, portee = 5, max = 10) {
+  const p = e.points;
+  if (!p.length) return [];
+  let forme;
+  if (e.forme === 'point') {
+    const r = e.type === 'arbre' ? (valeur(e, 'tronc') || 30) / 200 : (valeur(e, 'largeur') || 0.5) / 2;
+    forme = { aretes: [[p[0], p[0]]], poly: null, marge: r };
+  } else if (e.forme === 'surface' && p.length >= 3) forme = { aretes: anneau(p, true), poly: p, marge: 0 };
+  else {
+    const ep = (e.type === 'autre' ? valeur(e, 'largeur') : valeur(e, 'epaisseur')) || 0.2;
+    forme = { aretes: p.length >= 2 ? anneau(p, false) : [[p[0], p[0]]], poly: null, marge: ep / 2 };
+  }
+  return distancesDepuis(plan, forme, { el: e.id ?? '__brouillon__' }, portee, max);
+}
+
+// Cœur du calcul : forme = { aretes: [[a,b]…], poly (pour savoir si un élément est dedans), marge (rayon / demi-épaisseur) }
+function distancesDepuis(plan, forme, exclure, portee, max) {
+  const { aretes, poly, marge: margeObj } = forme;
+  const [x0, y0, x1, y1] = boite(aretes.flat(), portee + 1 + margeObj);
   const dehors = (pts) => pts.every((p) => p.x < x0) || pts.every((p) => p.x > x1) || pts.every((p) => p.y < y0) || pts.every((p) => p.y > y1);
   const res = [];
-  // segs : liste de [a, b] ; marge : demi-épaisseur ou rayon à déduire
+  // segs : liste de [a, b] ; marge : demi-épaisseur ou rayon de l'élément voisin à déduire
   const tester = (segs, lib, marge = 0) => {
     if (dehors(segs.flat())) return;
     let best = null;
     for (const [a, b] of segs) {
-      if (dansPolygone(a, R) || dansPolygone(b, R)) return;            // l'élément touche l'objet : c'est une alerte, pas une distance
+      if (poly && (dansPolygone(a, poly) || dansPolygone(b, poly))) return;   // l'élément touche l'objet : c'est une alerte, pas une distance
       for (const [c, d] of aretes) {
         const r = procheSegSeg(c, d, a, b);
         if (r.d === 0) return;
         if (!best || r.d < best.d) best = r;
       }
     }
-    if (!best) return;
-    const d = best.d - marge;
+    if (!best || best.d === 0) return;
+    const d = best.d - marge - margeObj;
     if (d <= 0.01 || d > portee) return;
-    const k = marge / best.d;  // ramène q sur le bord réel (tronc, épaisseur)
-    res.push({ p: best.p, q: { x: best.q.x + (best.p.x - best.q.x) * k, y: best.q.y + (best.p.y - best.q.y) * k }, d, lib });
+    // ramène les deux bouts sur les bords réels (tronc, épaisseur)
+    const kq = marge / best.d, kp = margeObj / best.d;
+    res.push({
+      p: { x: best.p.x + (best.q.x - best.p.x) * kp, y: best.p.y + (best.q.y - best.p.y) * kp },
+      q: { x: best.q.x + (best.p.x - best.q.x) * kq, y: best.q.y + (best.p.y - best.q.y) * kq },
+      d, lib,
+    });
   };
-  const anneau = (pts, ferme) => pts.slice(0, ferme ? pts.length : pts.length - 1).map((p, i) => [p, pts[(i + 1) % pts.length]]);
   const P = (g) => g.map(([x, y]) => ({ x, y }));
 
-  for (const a of plan.amenagement || []) if (a.id !== o.id) tester(anneau(coins(a), true), a.nom);
+  for (const a of plan.amenagement || []) if (a.id !== exclure.am) tester(anneau(coins(a), true), a.nom);
   const c = plan.contour.points;
   if (c.length >= 2) {
     // chaque côté du terrain séparément, pour voir la distance aux différents bords
     for (const s of anneau(c, plan.contour.ferme)) tester([s], 'Bord du terrain');
   }
   for (const e of plan.elements || []) {
+    if (e.id === exclure.el) continue;
     if (e.forme === 'point') {
       const r = e.type === 'arbre' ? (valeur(e, 'tronc') || 30) / 200 : (valeur(e, 'largeur') || 0.5) / 2;
       tester([[e.points[0], e.points[0]]], e.type === 'arbre' ? `${e.nom} (tronc)` : e.nom, r);

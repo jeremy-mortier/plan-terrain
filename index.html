@@ -102,15 +102,26 @@
       <div class="flottant nord" aria-label="Nord en haut">▲<br>N</div>
       <div class="flottant echelle"><span id="echTxt">10 m</span><i id="echBarre"></i></div>
       <div class="flottant survol" id="infoSurvol" hidden></div>
+      <button class="flottant suite" id="suite" type="button" hidden></button>
       <div class="flottant attrib">© <a href="https://geoportail.wallonie.be" target="_blank" rel="noopener">SPW</a> – PICC</div>
       <div id="vue3d" class="vue3d" hidden>
         <div class="v3-outils">
+          <button class="btn petit primaire" type="button" id="v3Fermer">Revenir au plan</button>
           <button class="btn petit" type="button" data-vue="oblique">Vue d'ensemble</button>
           <button class="btn petit" type="button" data-vue="dessus">Vue de dessus</button>
           <button class="btn petit" type="button" data-vue="pieton">À hauteur d'homme</button>
-          <button class="btn petit primaire" type="button" id="v3Fermer">Revenir au plan</button>
         </div>
-        <p class="v3-aide" id="v3Msg">Glissez pour tourner, pincez ou molette pour zoomer, deux doigts ou clic droit pour vous déplacer, double-touchez pour vous approcher. Terrain supposé plat ; bâtiments voisins à 6 m par défaut.</p>
+        <button class="v3-fleche v3-haut" type="button" data-nav="av" aria-label="Avancer" title="Avancer (flèche haut)">▲</button>
+        <button class="v3-fleche v3-bas" type="button" data-nav="ar" aria-label="Reculer" title="Reculer (flèche bas)">▼</button>
+        <button class="v3-fleche v3-gauche" type="button" data-nav="g" aria-label="Aller à gauche" title="Aller à gauche (flèche gauche)">◀</button>
+        <button class="v3-fleche v3-droite" type="button" data-nav="d" aria-label="Aller à droite" title="Aller à droite (flèche droite)">▶</button>
+        <div class="v3-pivot">
+          <button type="button" data-nav="tg" aria-label="Tourner à gauche" title="Tourner à gauche (Q)">⟲</button>
+          <button type="button" data-nav="td" aria-label="Tourner à droite" title="Tourner à droite (E)">⟳</button>
+          <button type="button" data-nav="zp" aria-label="Zoomer" title="Zoomer (+)">+</button>
+          <button type="button" data-nav="zm" aria-label="Dézoomer" title="Dézoomer (−)">−</button>
+        </div>
+        <p class="v3-aide" id="v3Msg">Glisser : se déplacer · deux doigts ou clic droit : tourner · pincer ou molette : zoomer · flèches du clavier, Q/E pour tourner · double-touche : s'approcher. Terrain supposé plat, bâtiments voisins à 6 m.</p>
       </div>
     </div>
 
@@ -177,6 +188,13 @@
           <label>Nom<input id="rNom" autocomplete="off"></label>
           <div class="grille-attr" id="rAttrs"></div>
           <p class="aide" id="rPts"></p>
+          <div class="distances">
+            <div class="rang entre">
+              <span class="aide">Éléments proches</span>
+              <label class="coche">jusqu'à <select id="rPortee" style="width:auto;min-height:30px"><option value="2">2 m</option><option value="5" selected>5 m</option><option value="10">10 m</option></select></label>
+            </div>
+            <ul id="rDist"></ul>
+          </div>
           <div class="rang" id="rBoutonsNouveau">
             <button class="btn primaire" id="rMesurer" type="button">Mesurer la position</button>
             <button class="btn" id="rSansMesure" type="button">Enregistrer sans mesurer</button>
