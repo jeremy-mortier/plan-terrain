@@ -376,6 +376,7 @@ function tapReleve(a, p, e) {
   if (b) {
     if (b.forme === 'point') b.points = [pt(a)];
     else b.points.push(pt(a));
+    ajusterLongueur(b);
     carte.setBrouillon(b);
     majReleve();
     return;
@@ -387,6 +388,16 @@ function tapReleve(a, p, e) {
   R.brouillon = { type, forme: rel.TYPES[type].forme || R.derniereForme || 'point', nom: '', attrs: {}, points: [pt(a)] };
   carte.setBrouillon(R.brouillon);
   majReleve(true);
+}
+
+// Haie ou muret droit dont la longueur est connue : la fin est placée à cette distance du début,
+// dans la direction indiquée sur la carte
+const longueurConnue = (b) => b.forme === 'ligne' && b.points.length === 2 && +b.attrs.longueur > 0;
+function ajusterLongueur(b) {
+  if (!longueurConnue(b)) return;
+  const [d, f] = b.points, L = +b.attrs.longueur;
+  const n = Math.hypot(f.x - d.x, f.y - d.y) || 1, ux = n > 0.01 ? (f.x - d.x) / n : 1, uy = n > 0.01 ? (f.y - d.y) / n : 0;
+  b.points[1] = { ...f, x: Math.round((d.x + ux * L) * 1000) / 1000, y: Math.round((d.y + uy * L) * 1000) / 1000 };
 }
 
 function selectionner(i) {
@@ -437,7 +448,11 @@ function majReleve(refaire = false) {
     $('#rPts').textContent = b.forme === 'point'
       ? 'Position approximative posée. Touchez la carte pour la déplacer.'
       : `${n} point${n > 1 ? 's' : ''} posé${n > 1 ? 's' : ''}${n >= 2 && b.forme === 'ligne' ? ` (${fmtM(perimetre(b.points, false), 1)})` : ''}. `
-        + (b.forme === 'ligne' ? 'Touchez la carte pour ajouter la fin (et les points intermédiaires si le tracé tourne).' : 'Touchez la carte pour ajouter les autres coins.');
+        + (b.forme === 'ligne'
+          ? (+b.attrs.longueur > 0
+            ? (n === 1 ? `Touchez la carte dans la direction de la fin : elle sera placée à ${fmtM(+b.attrs.longueur, 2)} du début.` : n === 2 ? 'Fin placée à la longueur indiquée. Mesurez ensuite le début depuis deux repères, puis la fin depuis un seul.' : 'Le tracé tourne : la longueur indiquée sert de repère, mesurez chaque point.')
+            : 'Touchez la carte pour ajouter la fin (et les points intermédiaires si le tracé tourne). Indiquez la longueur si vous la connaissez.')
+          : 'Touchez la carte pour ajouter les autres coins.');
     $('#rMesurer').disabled = $('#rSansMesure').disabled = n < min;
     $('#rRetirerPt').hidden = b.forme === 'point';
     $('#rRetirerPt').disabled = n <= 1;
@@ -528,7 +543,7 @@ function remplirForm(obj, nouveau) {
       inp.setCustomValidity('');
       if (!nouveau) pousserHisto();
       if (v === null) delete obj.attrs[cle]; else obj.attrs[cle] = v;
-      if (nouveau) carte.setBrouillon(obj);
+      if (nouveau) { ajusterLongueur(obj); carte.setBrouillon(obj); majReleve(); }
       else { carte.setElements(plan.elements, R.sel); sauver(); majReleve(); }
     };
     l.append(inp);
@@ -594,14 +609,21 @@ function mesurerElement(obj, onFini, onArret) {
   const etapePoint = (k) => {
     if (k >= pts.length) { onFini(); return; }
     const ajout = rel.ajoutMesure(obj);
+    // fin d'une haie / d'un muret droit de longueur connue, dont le début est mesuré :
+    // le début sert de repère A à la distance « longueur », il ne reste qu'une distance à prendre
+    const parLongueur = k === 1 && longueurConnue(obj) && pts[0].src === 'mesure';
+    const L = +obj.attrs.longueur;
     demarrerMesure({
       cible: pts[k],
       titre: obj.nom,
       sous: rel.nomPoint(obj, k),
       prog: pts.length > 1 ? `Point ${k + 1} / ${pts.length}` : '',
-      aide: obj.type === 'arbre'
-        ? `Mesurez depuis chaque repère jusqu'à la face du tronc : l'application ajoute le rayon (${fmt(ajout * 100, 0)} cm${obj.attrs.tronc == null ? ', diamètre par défaut' : ''}).`
-        : obj.forme === 'ligne' ? "Visez le milieu de l'extrémité (l'axe du muret ou de la haie)." : 'Tendez le mètre depuis chaque repère jusqu’au point.',
+      aide: parLongueur
+        ? `La fin est à ${fmtM(L, 2)} du début (longueur indiquée) : il suffit de mesurer la distance depuis le repère B.`
+        : obj.type === 'arbre'
+          ? `Mesurez depuis chaque repère jusqu'à la face du tronc : l'application ajoute le rayon (${fmt(ajout * 100, 0)} cm${obj.attrs.tronc == null ? ', diamètre par défaut' : ''}).`
+          : obj.forme === 'ligne' ? "Visez le milieu de l'extrémité (l'axe du muret ou de la haie)." : 'Tendez le mètre depuis chaque repère jusqu’au point.',
+      ...(parLongueur ? { refFixe: { x: pts[0].x, y: pts[0].y, lib: `Début de ${obj.nom} (longueur)` }, dFixe: L } : {}),
       ajout,
       cands: () => rel.candidats(plan, { exclureEl: obj.id, courants: pts.filter((_, j) => j !== k) }),
       onOk: (res, info) => {
@@ -621,9 +643,16 @@ let modeAvantMesure = null;
 
 function demarrerMesure(o) {
   const cands = o.cands();
-  const paire = rel.choisirReperes(o.cible, cands);
+  let paire;
+  if (o.refFixe) {
+    const B = rel.choisirAvec(o.cible, o.refFixe, cands);
+    paire = B ? [o.refFixe, B] : null;
+    M = { ...o, cands, refs: [o.refFixe, B], choix: B ? null : 1, res: null };
+  } else {
+    paire = rel.choisirReperes(o.cible, cands);
+    M = { ...o, cands, refs: paire ? [paire[0], paire[1]] : [null, null], choix: paire ? null : 0, res: null };
+  }
   modeAvantMesure ??= carte.mode;
-  M = { ...o, cands, refs: paire ? [paire[0], paire[1]] : [null, null], choix: paire ? null : 0, res: null };
   carte.setMode('releve');
   majSections();
   $('#mTitre').textContent = o.titre;
@@ -632,9 +661,10 @@ function demarrerMesure(o) {
   $('#mProg').hidden = !o.prog;
   $('#mPasser').hidden = !o.onPasser;
   $('#mD0').value = $('#mD1').value = '';
+  if (o.refFixe) $('#mD0').value = String(Math.round(o.dFixe * 100) / 100).replace('.', ',');
   cadrerMesure();
   majMesure();
-  if (matchMedia('(min-width: 901px)').matches && paire) $('#mD0').focus();
+  if (matchMedia('(min-width: 901px)').matches && paire) $(o.refFixe ? '#mD1' : '#mD0').focus();
 }
 
 function cadrerMesure() {

@@ -10,8 +10,8 @@ export const TYPES = {
     lib: 'Arbre', forme: 'point',
     champs: [['tronc', 'Ø du tronc', 'cm', 30], ['couronne', 'Ø de la couronne', 'm', 4], ['branches', 'Hauteur des 1res branches', 'm', null], ['hauteur', 'Hauteur totale', 'm', null]],
   },
-  haie: { lib: 'Haie', forme: 'ligne', champs: [['epaisseur', 'Épaisseur', 'm', 0.8], ['hauteur', 'Hauteur', 'm', null]] },
-  muret: { lib: 'Muret', forme: 'ligne', champs: [['epaisseur', 'Épaisseur', 'm', 0.2], ['hauteur', 'Hauteur', 'm', null]] },
+  haie: { lib: 'Haie', forme: 'ligne', champs: [['longueur', 'Longueur', 'm', null], ['epaisseur', 'Épaisseur', 'm', 0.8], ['hauteur', 'Hauteur', 'm', null]] },
+  muret: { lib: 'Muret', forme: 'ligne', champs: [['longueur', 'Longueur', 'm', null], ['epaisseur', 'Épaisseur', 'm', 0.2], ['hauteur', 'Hauteur', 'm', null]] },
   autre: { lib: 'Autre', forme: null, champs: [['largeur', 'Largeur ou Ø', 'm', 0.5], ['hauteur', 'Hauteur', 'm', null]] },
 };
 
@@ -97,6 +97,24 @@ export function choisirReperes(cible, cands, portee = 30) {
       }
     }
     if (best) return best.sort((a, b) => a.d - b.d);
+  }
+  return null;
+}
+
+// Le premier repère est imposé (ex. le début du muret, à la longueur connue) : choisit le second
+// pour former le meilleur angle avec lui.
+export function choisirAvec(cible, A, cands, portee = 30) {
+  let best = null, bc = Infinity;
+  for (const lim of [portee, portee * 2, Infinity]) {
+    for (const c of cands) {
+      const d = dist(c, cible);
+      if (d < 0.5 || d > lim || dist(c, A) < 0.3) continue;
+      const s = sinAngle(cible, A, c);
+      if (s < 0.34) continue;
+      const cout = d * c.poids / s;
+      if (cout < bc) { bc = cout; best = { ...c, d }; }
+    }
+    if (best) return best;
   }
   return null;
 }
