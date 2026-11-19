@@ -254,19 +254,39 @@ const anneau = (pts, ferme) => pts.slice(0, ferme ? pts.length : pts.length - 1)
 
 // Même chose pour un élément relevé (arbre, haie, muret, autre) : la forme est son tronc, son axe
 // (moins la demi-épaisseur) ou son contour
-export function distancesElement(plan, e, portee = 5, max = 10) {
+function formeElement(e) {
   const p = e.points;
-  if (!p.length) return [];
-  let forme;
   if (e.forme === 'point') {
     const r = e.type === 'arbre' ? (valeur(e, 'tronc') || 30) / 200 : (valeur(e, 'largeur') || 0.5) / 2;
-    forme = { aretes: [[p[0], p[0]]], poly: null, marge: r };
-  } else if (e.forme === 'surface' && p.length >= 3) forme = { aretes: anneau(p, true), poly: p, marge: 0 };
-  else {
-    const ep = (e.type === 'autre' ? valeur(e, 'largeur') : valeur(e, 'epaisseur')) || 0.2;
-    forme = { aretes: p.length >= 2 ? anneau(p, false) : [[p[0], p[0]]], poly: null, marge: ep / 2 };
+    return { aretes: [[p[0], p[0]]], poly: null, marge: r };
   }
-  return distancesDepuis(plan, forme, { el: e.id ?? '__brouillon__' }, portee, max);
+  if (e.forme === 'surface' && p.length >= 3) return { aretes: anneau(p, true), poly: p, marge: 0 };
+  const ep = (e.type === 'autre' ? valeur(e, 'largeur') : valeur(e, 'epaisseur')) || 0.2;
+  return { aretes: p.length >= 2 ? anneau(p, false) : [[p[0], p[0]]], poly: null, marge: ep / 2 };
+}
+
+export function distancesElement(plan, e, portee = 5, max = 10) {
+  if (!e.points.length) return [];
+  return distancesDepuis(plan, formeElement(e), { el: e.id ?? '__brouillon__' }, portee, max);
+}
+
+// Distances de l'élément vers des repères choisis par l'utilisateur (sans limite de portée).
+// Pour un arbre : jusqu'à la face du tronc ; pour une haie ou un muret : jusqu'au bord le plus proche.
+export function distancesVers(e, reperes) {
+  if (!e.points.length) return [];
+  const { aretes, poly, marge } = formeElement(e);
+  return reperes.map((r, n) => {
+    let best = null;
+    for (const [a, b] of aretes) {
+      const res = procheSegSeg(a, b, r, r);
+      if (res.d === undefined) continue;
+      if (!best || res.d < best.d) best = res;
+    }
+    const dedans = poly && dansPolygone(r, poly);
+    const d = dedans ? 0 : Math.max(best.d - marge, 0);
+    const k = best.d ? marge / best.d : 0;
+    return { p: { x: best.p.x + (r.x - best.p.x) * k, y: best.p.y + (r.y - best.p.y) * k }, q: r, d, lib: r.lib, n: n + 1, choisi: true };
+  });
 }
 
 // Cœur du calcul : forme = { aretes: [[a,b]…], poly (pour savoir si un élément est dedans), marge (rayon / demi-épaisseur) }

@@ -203,7 +203,10 @@ async function ouvrirPlan(id) {
   RT = { actif: false, sel: -1, modeAvant: null };
   histo = [];
   if (M) finMesure();
-  R = { sel: -1, brouillon: null, dernierType: R.dernierType };
+  R = { sel: -1, brouillon: null, dernierType: R.dernierType, choixRep: false };
+  plan.reperes ||= [];
+  carte.reperesChoisis = plan.reperes;
+  majRepereUI();
   A = { sel: -1, aligner: false };
   etape = !plan.contour.valide ? 1 : plan.amenagement.length ? 3 : 2;
   carte.setBrouillon(null);
@@ -249,6 +252,8 @@ function allerEtape(n) {
   });
   R.sel = -1;
   A.sel = -1;
+  R.choixRep = false;
+  majRepereUI();
   majSections();
   carte.setElements(plan.elements);
   carte.setMode(modeEtape());
@@ -376,6 +381,7 @@ const etatEl = (e) => (estMesure(e) ? 'mesuré' : estPlace(e) ? 'placé' : 'esti
 
 function tapReleve(a, p, e) {
   if (M) { if (M.choix != null) choisirRepereSur(a, p, e); return; }
+  if (R.choixRep) { basculerRepere(a); return; }
   const b = R.brouillon;
   if (b) {
     if (b.forme === 'point') b.points = [pt(a)];
@@ -411,6 +417,35 @@ $('#suite').onclick = () => {
   const c = $('#suite').dataset.cible;
   if (c) $(c).scrollIntoView({ behavior: 'smooth', block: 'start' });
 };
+
+// ---- Repères choisis par l'utilisateur : distances en direct depuis ces points fixes
+const MAX_REPERES = 6;
+function basculerRepere(a) {
+  const l = plan.reperes;
+  const i = l.findIndex((r) => Math.hypot(r.x - a.x, r.y - a.y) < 0.3);
+  if (i >= 0) l.splice(i, 1);
+  else if (l.length < MAX_REPERES) {
+    const lib = a.contour !== undefined ? `Coin ${a.contour + 1} du contour`
+      : { picc: 'Coin du plan SPW', ligne: 'Point sur une ligne du plan SPW', element: "Point d'un élément relevé", libre: 'Point libre' }[a.src] || 'Point';
+    l.push({ x: Math.round(a.x * 1000) / 1000, y: Math.round(a.y * 1000) / 1000, lib });
+  }
+  sauver();
+  majRepereUI();
+  carte.dessinerOverlay();
+  majReleve();
+}
+function majRepereUI() {
+  const n = plan.reperes.length;
+  $('#rChoisirRep').textContent = R.choixRep ? `Terminer le choix (${n}/${MAX_REPERES})` : n ? `Mes repères (${n}) : modifier` : 'Choisir mes repères';
+  $('#rChoisirRep').setAttribute('aria-pressed', !!R.choixRep);
+  $('#rEffacerRep').hidden = !n;
+  $('#rRepAide').hidden = !R.choixRep;
+  $('#rDistTitre').textContent = n ? 'Distances à mes repères' : 'Éléments proches';
+  $('#rPorteeLib').hidden = !!n;
+}
+$('#rChoisirRep').onclick = () => { R.choixRep = !R.choixRep; majRepereUI(); majReleve(); };
+$('#rEffacerRep').onclick = () => { plan.reperes = []; carte.reperesChoisis = plan.reperes; R.choixRep = false; sauver(); majRepereUI(); carte.dessinerOverlay(); majReleve(); };
+carte.calculReperes = (el) => am.distancesVers(el, plan.reperes);
 
 // Haie ou muret droit dont la longueur est connue : la fin est placée à cette distance du début,
 // dans la direction indiquée sur la carte
@@ -892,7 +927,7 @@ function majDistances(liste = carte.distances, ulSel = '#aDist', porteeSel = '#a
   ul.replaceChildren(...l.map((r) => {
     const li = document.createElement('li');
     li.innerHTML = '<span></span><b></b>';
-    li.querySelector('span').textContent = r.lib;
+    li.querySelector('span').textContent = r.n ? `R${r.n} · ${r.lib}` : r.lib;
     li.querySelector('b').textContent = fmtM(r.d, 2);
     return li;
   }));

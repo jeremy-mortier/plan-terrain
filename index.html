@@ -121,7 +121,7 @@
           <button type="button" data-nav="zp" aria-label="Zoomer" title="Zoomer (+)">+</button>
           <button type="button" data-nav="zm" aria-label="Dézoomer" title="Dézoomer (−)">−</button>
         </div>
-        <p class="v3-aide" id="v3Msg">Glisser : se déplacer · deux doigts ou clic droit : tourner · pincer ou molette : zoomer · flèches du clavier, Q/E pour tourner · double-touche : s'approcher. Terrain supposé plat, bâtiments voisins à 6 m.</p>
+        <p class="v3-aide" id="v3Msg">Clic gauche + glisser : tourner le regard · clic droit + glisser : se déplacer · molette : zoomer · flèches du clavier : avancer, Q/E : tourner · double-clic : s'approcher. Terrain supposé plat, bâtiments voisins à 6 m.</p>
       </div>
     </div>
 
@@ -182,6 +182,13 @@
           <span class="pastille" id="rEtat"></span>
         </div>
         <p class="aide" id="rAide"></p>
+        <div class="reperes-choix">
+          <div class="rang">
+            <button class="btn petit" type="button" id="rChoisirRep" aria-pressed="false">Choisir mes repères</button>
+            <button class="btn petit" type="button" id="rEffacerRep" hidden>Effacer les repères</button>
+          </div>
+          <p class="aide" id="rRepAide" hidden>Touchez sur la carte les points fixes depuis lesquels vous mesurez au mètre : coin de bâtiment, poteau, coin du terrain, élément déjà relevé… Ils s'accrochent au plan. Touchez un repère une deuxième fois pour l'enlever.</p>
+        </div>
         <div class="r-form" id="rForm" hidden>
           <div class="choix" id="rTypes" role="group" aria-label="Type d'élément"></div>
           <div class="choix" id="rFormes" role="group" aria-label="Forme"></div>
@@ -190,8 +197,8 @@
           <p class="aide" id="rPts"></p>
           <div class="distances">
             <div class="rang entre">
-              <span class="aide">Éléments proches</span>
-              <label class="coche">jusqu'à <select id="rPortee" style="width:auto;min-height:30px"><option value="2">2 m</option><option value="5" selected>5 m</option><option value="10">10 m</option><option value="20">20 m</option><option value="50">50 m</option></select></label>
+              <span class="aide" id="rDistTitre">Éléments proches</span>
+              <label class="coche" id="rPorteeLib">jusqu'à <select id="rPortee" style="width:auto;min-height:30px"><option value="2">2 m</option><option value="5" selected>5 m</option><option value="10">10 m</option><option value="20">20 m</option><option value="50">50 m</option></select></label>
             </div>
             <ul id="rDist"></ul>
           </div>

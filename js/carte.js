@@ -693,22 +693,22 @@ export class Carte {
   }
 
   // Traits de distance vers les éléments proches, avec la valeur
-  dessinerDistances(o, liste) {
+  dessinerDistances(o, liste, cls = 'dist') {
     for (const r of liste) {
       const p = this.versEcran(r.p), q = this.versEcran(r.q);
       const L = Math.hypot(q.x - p.x, q.y - p.y);
-      el('line', { x1: p.x, y1: p.y, x2: q.x, y2: q.y, class: 'dist-ligne' }, o);
-      el('circle', { cx: q.x, cy: q.y, r: 2.5, class: 'dist-bout' }, o);
+      el('line', { x1: p.x, y1: p.y, x2: q.x, y2: q.y, class: `${cls}-ligne` }, o);
+      el('circle', { cx: q.x, cy: q.y, r: 2.5, class: `${cls}-bout` }, o);
       const txt = `${fmtNb(Math.round(r.d * 100) / 100)} m`;
       if (L < 46) {
         // trait trop court pour y écrire : étiquette à côté de l'élément
         const ux = L ? (q.x - p.x) / L : 0, uy = L ? (q.y - p.y) / L : -1;
-        el('text', { class: 'dist-txt', x: q.x + ux * 22, y: q.y + uy * 14 + 4 }, o).textContent = txt;
+        el('text', { class: `${cls}-txt`, x: q.x + ux * 22, y: q.y + uy * 14 + 4 }, o).textContent = txt;
         continue;
       }
       let ang = Math.atan2(q.y - p.y, q.x - p.x) * 180 / Math.PI;
       if (ang > 90) ang -= 180; if (ang < -90) ang += 180;
-      const t = el('text', { class: 'dist-txt', transform: `translate(${(p.x + q.x) / 2},${(p.y + q.y) / 2}) rotate(${ang}) translate(0,-4)` }, o);
+      const t = el('text', { class: `${cls}-txt`, transform: `translate(${(p.x + q.x) / 2},${(p.y + q.y) / 2}) rotate(${ang}) translate(0,-4)` }, o);
       t.textContent = txt;
     }
   }
@@ -717,8 +717,17 @@ export class Carte {
   dessinerReleve(o) {
     // distances en direct depuis l'élément en saisie ou sélectionné (sauf pendant une mesure)
     const cibleDist = this.brouillon?.points.length ? this.brouillon : this.elements[this.selEl];
-    this.distancesEl = cibleDist && !this.mesure && this.glisserElements && this.calculDistancesEl ? this.calculDistancesEl(cibleDist) : [];
-    this.dessinerDistances(o, this.distancesEl);
+    const reps = this.mesure ? [] : this.reperesChoisis || [];
+    const actif = cibleDist && !this.mesure && this.glisserElements;
+    // repères choisis : distances vers eux seulement ; sinon les éléments proches
+    this.distancesEl = actif ? (reps.length ? this.calculReperes(cibleDist) : this.calculDistancesEl?.(cibleDist) || []) : [];
+    this.dessinerDistances(o, this.distancesEl, reps.length ? 'rep' : 'dist');
+    reps.forEach((r, i) => {
+      const q = this.versEcran(r);
+      const g = el('g', { class: 'repere-choisi', transform: `translate(${q.x},${q.y})` }, o);
+      el('rect', { x: -6, y: -6, width: 12, height: 12, transform: 'rotate(45)' }, g);
+      el('text', { x: 12, y: -8 }, g).textContent = `R${i + 1}`;
+    });
     const poignees = (e, cls) => e.points.forEach((p) => {
       const q = this.versEcran(p);
       el('circle', { cx: q.x, cy: q.y, r: 5, class: `sommet ${cls} src-${p.src || 'libre'}` }, o);

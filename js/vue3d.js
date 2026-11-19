@@ -529,12 +529,44 @@ export function ouvrir(conteneur, plan) {
     ctrl.target.add(v);
     ctrl.update();
   }
-  function tourner(degres) {
-    const off = camera.position.clone().sub(ctrl.target);
-    off.applyAxisAngle(haut, degres * Math.PI / 180);
-    camera.position.copy(ctrl.target).add(off);
+  // Tourner le regard sur place (comme tourner la tête) : la caméra ne bouge pas, le point visé tourne autour d'elle.
+  // lacet = gauche/droite, tangage = haut/bas (radians). Le point visé reste posé au sol.
+  function regarder(lacet, tangage = 0) {
+    const dir = ctrl.target.clone().sub(camera.position);
+    dir.applyAxisAngle(haut, lacet);
+    if (tangage) {
+      const axe = new THREE.Vector3().crossVectors(dir, haut).normalize();
+      const essai = dir.clone().applyAxisAngle(axe, tangage).normalize();
+      if (essai.y < -0.04 && essai.y > -0.995) dir.copy(essai);   // toujours un peu vers le bas, jamais à la verticale
+    }
+    dir.normalize();
+    // nouveau point visé : là où le regard touche le sol (limité à 200 m devant)
+    const t = dir.y < -0.01 ? Math.min(camera.position.y / -dir.y, 200) : 200;
+    ctrl.target.copy(camera.position).addScaledVector(dir, t);
+    if (ctrl.target.y < 0) ctrl.target.y = 0;
     ctrl.update();
   }
+  const tourner = (degres) => regarder(degres * Math.PI / 180, 0);
+
+  // Souris : clic gauche + glisser = tourner le regard (gauche/droite et haut/bas) ;
+  // clic droit + glisser = se déplacer ; Maj + clic droit = tourner autour du centre ; molette = zoom
+  ctrl.mouseButtons = { LEFT: -1, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
+  let regard = null;
+  rendu.domElement.addEventListener('pointerdown', (e) => {
+    if (e.pointerType !== 'mouse' || e.button !== 0) return;
+    regard = { x: e.clientX, y: e.clientY, id: e.pointerId };
+    rendu.domElement.style.cursor = 'grabbing';
+  });
+  rendu.domElement.addEventListener('pointermove', (e) => {
+    if (!regard || e.pointerId !== regard.id) return;
+    const dx = e.clientX - regard.x, dy = e.clientY - regard.y;
+    regard.x = e.clientX; regard.y = e.clientY;
+    regarder(dx * 0.005, dy * 0.004);   // on « attrape » le paysage, comme dans Street View
+  });
+  const finRegard = () => { regard = null; rendu.domElement.style.cursor = ''; };
+  rendu.domElement.addEventListener('pointerup', finRegard);
+  rendu.domElement.addEventListener('pointercancel', finRegard);
+  rendu.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
   function zoomer(f) {
     const off = camera.position.clone().sub(ctrl.target);
     const L = Math.min(Math.max(off.length() * f, ctrl.minDistance), ctrl.maxDistance);
