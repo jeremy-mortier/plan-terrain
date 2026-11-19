@@ -117,6 +117,12 @@ export class Carte {
     this.elements = elements;
     this.selEl = sel;
     this.sommetsEl = elements.flatMap((e) => e.points.map((p) => [p.x, p.y]));
+    // segments des haies, murets et surfaces relevés : on peut s'y accrocher
+    this.segmentsEl = elements.flatMap((e) => {
+      if (e.forme === 'point' || e.points.length < 2) return [];
+      const p = e.points, n = e.forme === 'surface' ? p.length : p.length - 1;
+      return Array.from({ length: n }, (_, k) => [p[k].x, p[k].y, p[(k + 1) % p.length].x, p[(k + 1) % p.length].y]);
+    });
     this.gElements.replaceChildren();
     elements.forEach((e, i) => {
       const mesure = e.points.every((p) => p.src === 'mesure');
@@ -274,9 +280,15 @@ export class Carte {
     return d;
   }
 
+  // Placement point par point : { pt (le point modifié), contraindre(pos) → pos, distances() → liste, refs, choix }
+  setPlacement(pl) {
+    this.placement = pl;
+    this.dessinerOverlay();
+  }
+
   // Élément relevé qu'on peut faire glisser sous le doigt : celui en cours de saisie ou celui sélectionné
   cibleGlisser(p, e) {
-    if (!this.glisserElements) return null;
+    if (!this.glisserElements || this.placement) return null;
     const m = this.versMonde(p.x, p.y), r = this.rayon(e);
     if (this.brouillon && this.distanceEcran(this.brouillon, m) < r) return 'brouillon';
     const el = this.elements[this.selEl];
@@ -364,11 +376,13 @@ export class Carte {
     if (best) return best;
     // 3. sur une ligne PICC
     bd = r * 0.8;
-    for (const [x1, y1, x2, y2] of this.segments || []) {
-      if (m.x < Math.min(x1, x2) - bd || m.x > Math.max(x1, x2) + bd || m.y < Math.min(y1, y2) - bd || m.y > Math.max(y1, y2) + bd) continue;
-      const q = projSeg(m, { x: x1, y: y1 }, { x: x2, y: y2 });
-      const d = dist(q, m);
-      if (d < bd) { bd = d; best = { x: q.x, y: q.y, src: 'ligne' }; }
+    for (const [lst, src] of [[this.segmentsEl || [], 'element'], [this.segments || [], 'ligne']]) {
+      for (const [x1, y1, x2, y2] of lst) {
+        if (m.x < Math.min(x1, x2) - bd || m.x > Math.max(x1, x2) + bd || m.y < Math.min(y1, y2) - bd || m.y > Math.max(y1, y2) + bd) continue;
+        const q = projSeg(m, { x: x1, y: y1 }, { x: x2, y: y2 });
+        const d = dist(q, m);
+        if (d < bd) { bd = d; best = { x: q.x, y: q.y, src }; }
+      }
     }
     return best || libre;
   }
@@ -417,6 +431,10 @@ export class Carte {
       return;
     }
     if (this.pointeurs.size > 2) return;
+    if (this.mode === 'releve' && this.placement && !this.placement.choix) {
+      const q = this.versEcran(this.placement.pt);
+      if (Math.hypot(q.x - p.x, q.y - p.y) < this.rayon(e) + 14) { this.geste = { type: 'placer', depart: p, bouge: false }; return; }
+    }
     if (this.mode === 'releve' && !this.mesure) {
       const cible = this.cibleGlisser(p, e);
       if (cible != null) { this.geste = { type: 'element', cible, depart: p, dernier: this.versMonde(p.x, p.y), bouge: false }; return; }
@@ -479,6 +497,17 @@ export class Carte {
       } else if (e.pointerType !== 'mouse' && (this.mode === 'tracer' || this.mode === 'releve')) {
         this.setSurvol(this.accrocher(p.x, p.y, e));
       }
+    } else if (g.type === 'placer') {
+      if (!g.bouge && Math.hypot(p.x - g.depart.x, p.y - g.depart.y) > 3) g.bouge = true;
+      if (g.bouge) {
+        // aimant (sauf touche Maj), puis contraintes : longueur, angle droit…
+        const a = e.shiftKey ? { ...this.versMonde(p.x, p.y), src: 'libre' } : this.accrocher(p.x, p.y, e);
+        const pos = this.placement.contraindre ? this.placement.contraindre(a) : a;
+        this.placement.pt.x = Math.round(pos.x * 1000) / 1000;
+        this.placement.pt.y = Math.round(pos.y * 1000) / 1000;
+        this.setBrouillon(this.brouillon);
+        this.onPlacement?.('bouge');
+      }
     } else if (g.type === 'element') {
       if (!g.bouge && Math.hypot(p.x - g.depart.x, p.y - g.depart.y) > 5) { g.bouge = true; this.onElement?.('debut', g.cible); }
       if (g.bouge) {
@@ -531,6 +560,10 @@ export class Carte {
     if (annule) return;
     if (g.type === 'pan' && !g.bouge) this.tap(p, e);
     if ((g.type === 'objet' || g.type === 'rotation') && g.bouge) this.onObjet?.('fin', g.i);
+    if (g.type === 'placer') {
+      if (g.bouge) this.onPlacement?.('fin'); else this.tap(p, e);
+      if (e.pointerType !== 'mouse') this.setSurvol(null);
+    }
     if (g.type === 'element') {
       if (g.bouge) this.onElement?.('fin', g.cible);
       else this.tap(p, e);   // simple touche : comportement habituel (sélection, point suivant…)
@@ -716,18 +749,25 @@ export class Carte {
   // Poignées de l'élément sélectionné / en saisie, repères et cercles de mesure
   dessinerReleve(o) {
     // distances en direct depuis l'élément en saisie ou sélectionné (sauf pendant une mesure)
+    const pl = this.placement;
     const cibleDist = this.brouillon?.points.length ? this.brouillon : this.elements[this.selEl];
-    const reps = this.mesure ? [] : this.reperesChoisis || [];
-    const actif = cibleDist && !this.mesure && this.glisserElements;
-    // repères choisis : distances vers eux seulement ; sinon les éléments proches
-    this.distancesEl = actif ? (reps.length ? this.calculReperes(cibleDist) : this.calculDistancesEl?.(cibleDist) || []) : [];
-    this.dessinerDistances(o, this.distancesEl, reps.length ? 'rep' : 'dist');
-    reps.forEach((r, i) => {
-      const q = this.versEcran(r);
-      const g = el('g', { class: 'repere-choisi', transform: `translate(${q.x},${q.y})` }, o);
-      el('rect', { x: -6, y: -6, width: 12, height: 12, transform: 'rotate(45)' }, g);
-      el('text', { x: 12, y: -8 }, g).textContent = `R${i + 1}`;
-    });
+    const actif = cibleDist && !this.mesure && !pl && this.glisserElements;
+    // hors placement : distances aux éléments proches de l'élément sélectionné
+    this.distancesEl = actif ? this.calculDistancesEl?.(cibleDist) || [] : [];
+    this.dessinerDistances(o, this.distancesEl, 'dist');
+    if (pl) {
+      // placement : distances du point vers les repères choisis, repères numérotés, point à glisser
+      this.dessinerDistances(o, pl.distances(), 'rep');
+      pl.refs.forEach((r, i) => {
+        const q = this.versEcran(r);
+        const g = el('g', { class: 'repere-choisi', transform: `translate(${q.x},${q.y})` }, o);
+        el('rect', { x: -6, y: -6, width: 12, height: 12, transform: 'rotate(45)' }, g);
+        el('text', { x: 12, y: -8 }, g).textContent = `R${i + 1}`;
+      });
+      const q = this.versEcran(pl.pt);
+      el('circle', { cx: q.x, cy: q.y, r: 13, class: 'pt-placer-halo' }, o);
+      el('circle', { cx: q.x, cy: q.y, r: 6.5, class: 'pt-placer' }, o);
+    }
     const poignees = (e, cls) => e.points.forEach((p) => {
       const q = this.versEcran(p);
       el('circle', { cx: q.x, cy: q.y, r: 5, class: `sommet ${cls} src-${p.src || 'libre'}` }, o);

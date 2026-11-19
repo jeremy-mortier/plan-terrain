@@ -280,6 +280,16 @@ svg.leg { flex: none; overflow: visible; }
 .overlay .rep-txt { font: 600 12.5px var(--f-chiffre); fill: var(--accent); text-anchor: middle; paint-order: stroke; stroke: var(--papier); stroke-width: 3.5px; pointer-events: none; }
 .overlay .repere-choisi rect { fill: var(--accent); stroke: var(--papier); stroke-width: 2; }
 .overlay .repere-choisi text { font: 700 12px var(--f-chiffre); fill: var(--accent); paint-order: stroke; stroke: var(--papier); stroke-width: 3px; pointer-events: none; }
+.overlay .pt-placer { fill: var(--attention); stroke: var(--papier); stroke-width: 2.5; }
+.overlay .pt-placer-halo { fill: none; stroke: var(--attention); stroke-width: 2; stroke-dasharray: 3 3; }
+.pl-reperes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.pl-reperes li { display: flex; align-items: center; gap: 8px; padding: 6px 8px; background: var(--fond); border-radius: 6px; font-size: 13px; }
+.pl-reperes li span { flex: 1; min-width: 0; }
+.pl-reperes li b { font-family: var(--f-chiffre); font-size: 17px; color: var(--accent); }
+.pl-reperes li button { border: 0; background: none; color: var(--gris); font-size: 17px; cursor: pointer; width: 28px; height: 28px; border-radius: 4px; }
+.pl-reperes li button:hover { color: var(--danger); background: var(--danger-doux); }
+.pl-angle { margin: 0; font-size: 14px; font-weight: 600; color: var(--accent); }
+.pl-angle:empty { display: none; }
 .distances { display: flex; flex-direction: column; gap: 4px; }
 .distances ul { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; font-size: 13px; }
 .distances li { display: contents; }

@@ -151,6 +151,28 @@
         </div>
       </section>
 
+      <!-- Placement point par point d'un élément relevé, à la distance de repères choisis -->
+      <section class="carte-ui mesure" id="sPlacer" hidden>
+        <div class="rang entre">
+          <h2>Placer sur la carte</h2>
+          <span class="pastille" id="plProg"></span>
+        </div>
+        <p class="m-titre"><b id="plTitre"></b> <span id="plSous"></span></p>
+        <p class="aide" id="plAide"></p>
+        <ul class="pl-reperes" id="plReperes"></ul>
+        <div class="rang">
+          <button class="btn petit" type="button" id="plAjRep" aria-pressed="false">Ajouter un repère</button>
+        </div>
+        <p class="m-res" id="plLong"></p>
+        <label class="coche" id="plVerrouLib"><input type="checkbox" id="plVerrou" checked> Garder la longueur indiquée</label>
+        <p class="pl-angle" id="plAngle"></p>
+        <div class="rang">
+          <button class="btn primaire" type="button" id="plFixer">Fixer ce point</button>
+          <button class="btn" type="button" id="plPrec">Point précédent</button>
+          <button class="btn" type="button" id="plAnnuler">Arrêter</button>
+        </div>
+      </section>
+
       <!-- Retrait d'éléments du plan SPW qui n'existent plus -->
       <section class="carte-ui mesure" id="sRetrait" hidden>
         <div class="rang entre">
@@ -182,13 +204,7 @@
           <span class="pastille" id="rEtat"></span>
         </div>
         <p class="aide" id="rAide"></p>
-        <div class="reperes-choix">
-          <div class="rang">
-            <button class="btn petit" type="button" id="rChoisirRep" aria-pressed="false">Choisir mes repères</button>
-            <button class="btn petit" type="button" id="rEffacerRep" hidden>Effacer les repères</button>
-          </div>
-          <p class="aide" id="rRepAide" hidden>Touchez sur la carte les points fixes depuis lesquels vous mesurez au mètre : coin de bâtiment, poteau, coin du terrain, élément déjà relevé… Ils s'accrochent au plan. Touchez un repère une deuxième fois pour l'enlever.</p>
-        </div>
+        
         <div class="r-form" id="rForm" hidden>
           <div class="choix" id="rTypes" role="group" aria-label="Type d'élément"></div>
           <div class="choix" id="rFormes" role="group" aria-label="Forme"></div>
@@ -203,13 +219,13 @@
             <ul id="rDist"></ul>
           </div>
           <div class="rang" id="rBoutonsNouveau">
-            <button class="btn primaire" id="rMesurer" type="button">Mesurer la position</button>
-            <button class="btn" id="rSansMesure" type="button">Enregistrer sans mesurer</button>
+            <button class="btn primaire" id="rMesurer" type="button">Placer sur la carte</button>
+            <button class="btn" id="rSansMesure" type="button">Enregistrer tel quel</button>
             <button class="btn" id="rRetirerPt" type="button">Retirer le dernier point</button>
             <button class="btn" id="rAnnulerForm" type="button">Annuler</button>
           </div>
           <div class="rang" id="rBoutonsSel">
-            <button class="btn primaire" id="rRemesurer" type="button">Remesurer</button>
+            <button class="btn primaire" id="rRemesurer" type="button">Replacer</button>
             <button class="btn" id="rFermerSel" type="button">Fermer</button>
             <button class="btn petit danger" id="rSupprimer" type="button">Supprimer</button>
           </div>

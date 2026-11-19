@@ -1,7 +1,7 @@
 import * as spw from './spw.js';
 import * as store from './store.js';
 import { Carte } from './carte.js';
-import { aire, perimetre, seRecoupe, fmtM, fmtM2, fmt, dist } from './geom.js';
+import { aire, perimetre, seRecoupe, fmtM, fmtM2, fmt, dist, projSeg } from './geom.js';
 import * as rel from './releve.js';
 import * as am from './amenagement.js';
 import * as imp from './impression.js';
@@ -158,6 +158,7 @@ function pousserHisto() {
 
 function annuler() {
   if (!histo.length) return;
+  if (P) finPlacement(false);
   const retraitActif = RT.actif;
   if (retraitActif) finRetrait();
   if (M) finMesure();
@@ -203,10 +204,8 @@ async function ouvrirPlan(id) {
   RT = { actif: false, sel: -1, modeAvant: null };
   histo = [];
   if (M) finMesure();
-  R = { sel: -1, brouillon: null, dernierType: R.dernierType, choixRep: false };
-  plan.reperes ||= [];
-  carte.reperesChoisis = plan.reperes;
-  majRepereUI();
+  if (P) { P = null; carte.setPlacement(null); }
+  R = { sel: -1, brouillon: null, dernierType: R.dernierType };
   A = { sel: -1, aligner: false };
   etape = !plan.contour.valide ? 1 : plan.amenagement.length ? 3 : 2;
   carte.setBrouillon(null);
@@ -231,15 +230,17 @@ const modeEtape = () => etape === 3 ? 'amenager' : etape === 2 ? 'releve' : plan
 // Sections du panneau visibles selon l'étape (la mesure en cours prend toute la place)
 const SECTIONS = { 1: ['sContour'], 2: ['sReleve'], 3: ['sAmenag', 'sAlertes', 'sCatalogue', 'sMateriel'] };
 function majSections() {
-  const plein = !!M || RT.actif;
+  const plein = !!M || RT.actif || !!P;
   for (const [n, ids] of Object.entries(SECTIONS)) for (const id of ids) $(`#${id}`).hidden = plein || +n !== etape;
   $('#sMesure').hidden = !M;
+  $('#sPlacer').hidden = !P;
   $('#sRetrait').hidden = !RT.actif || !!M;
   carte.glisserElements = etape === 2 && !RT.actif && !M;
   if (plan) majSuite();
 }
 
 function allerEtape(n) {
+  if (P) finPlacement(false);
   if (RT.actif) finRetrait();
   if (M) finMesure();
   if (R.brouillon) annulerBrouillon();
@@ -252,8 +253,6 @@ function allerEtape(n) {
   });
   R.sel = -1;
   A.sel = -1;
-  R.choixRep = false;
-  majRepereUI();
   majSections();
   carte.setElements(plan.elements);
   carte.setMode(modeEtape());
@@ -380,8 +379,8 @@ const estPlace = (e) => !estMesure(e) && e.points.every((p) => p.src === 'mesure
 const etatEl = (e) => (estMesure(e) ? 'mesuré' : estPlace(e) ? 'placé' : 'estimé');
 
 function tapReleve(a, p, e) {
+  if (P) { tapPlacement(a); return; }
   if (M) { if (M.choix != null) choisirRepereSur(a, p, e); return; }
-  if (R.choixRep) { basculerRepere(a); return; }
   const b = R.brouillon;
   if (b) {
     if (b.forme === 'point') b.points = [pt(a)];
@@ -405,6 +404,7 @@ function majSuite() {
   const b = $('#suite');
   let txt = '', cible = null;
   if (M) { txt = 'Saisir les distances ↓'; cible = '#sMesure'; }
+  else if (P) { txt = P.choix ? 'Choisir un repère sur la carte ↓' : 'Distances et « Fixer ce point » ↓'; cible = '#sPlacer'; }
   else if (RT.actif && RT.sel >= 0) { txt = 'Retirer cet élément ↓'; cible = '#sRetrait'; }
   else if (etape === 2 && R.brouillon) { txt = `${rel.TYPES[R.brouillon.type].lib} posé · compléter la fiche ↓`; cible = '#rForm'; }
   else if (etape === 2 && R.sel >= 0) { txt = 'Voir la fiche ↓'; cible = '#rForm'; }
@@ -417,35 +417,6 @@ $('#suite').onclick = () => {
   const c = $('#suite').dataset.cible;
   if (c) $(c).scrollIntoView({ behavior: 'smooth', block: 'start' });
 };
-
-// ---- Repères choisis par l'utilisateur : distances en direct depuis ces points fixes
-const MAX_REPERES = 6;
-function basculerRepere(a) {
-  const l = plan.reperes;
-  const i = l.findIndex((r) => Math.hypot(r.x - a.x, r.y - a.y) < 0.3);
-  if (i >= 0) l.splice(i, 1);
-  else if (l.length < MAX_REPERES) {
-    const lib = a.contour !== undefined ? `Coin ${a.contour + 1} du contour`
-      : { picc: 'Coin du plan SPW', ligne: 'Point sur une ligne du plan SPW', element: "Point d'un élément relevé", libre: 'Point libre' }[a.src] || 'Point';
-    l.push({ x: Math.round(a.x * 1000) / 1000, y: Math.round(a.y * 1000) / 1000, lib });
-  }
-  sauver();
-  majRepereUI();
-  carte.dessinerOverlay();
-  majReleve();
-}
-function majRepereUI() {
-  const n = plan.reperes.length;
-  $('#rChoisirRep').textContent = R.choixRep ? `Terminer le choix (${n}/${MAX_REPERES})` : n ? `Mes repères (${n}) : modifier` : 'Choisir mes repères';
-  $('#rChoisirRep').setAttribute('aria-pressed', !!R.choixRep);
-  $('#rEffacerRep').hidden = !n;
-  $('#rRepAide').hidden = !R.choixRep;
-  $('#rDistTitre').textContent = n ? 'Distances à mes repères' : 'Éléments proches';
-  $('#rPorteeLib').hidden = !!n;
-}
-$('#rChoisirRep').onclick = () => { R.choixRep = !R.choixRep; majRepereUI(); majReleve(); };
-$('#rEffacerRep').onclick = () => { plan.reperes = []; carte.reperesChoisis = plan.reperes; R.choixRep = false; sauver(); majRepereUI(); carte.dessinerOverlay(); majReleve(); };
-carte.calculReperes = (el) => am.distancesVers(el, plan.reperes);
 
 // Haie ou muret droit dont la longueur est connue : la fin est placée à cette distance du début,
 // dans la direction indiquée sur la carte
@@ -508,7 +479,7 @@ function majReleve(refaire = false) {
       : `${n} point${n > 1 ? 's' : ''} posé${n > 1 ? 's' : ''}${n >= 2 && b.forme === 'ligne' ? ` (${fmtM(perimetre(b.points, false), 1)})` : ''}. `
         + (b.forme === 'ligne'
           ? (+b.attrs.longueur > 0
-            ? (n === 1 ? `Touchez la carte dans la direction de la fin : elle sera placée à ${fmtM(+b.attrs.longueur, 2)} du début.` : n === 2 ? 'Fin placée à la longueur indiquée. Mesurez ensuite le début depuis deux repères, puis la fin depuis un seul.' : 'Le tracé tourne : la longueur indiquée sert de repère, mesurez chaque point.')
+            ? (n === 1 ? `Touchez la carte dans la direction de la fin : elle sera placée à ${fmtM(+b.attrs.longueur, 2)} du début.` : n === 2 ? 'Fin placée à la longueur indiquée. Cliquez sur « Placer sur la carte » pour ajuster le début puis la fin depuis vos repères.' : 'Le tracé tourne : placez ensuite chaque point depuis vos repères.')
             : 'Touchez la carte pour ajouter la fin (et les points intermédiaires si le tracé tourne). Indiquez la longueur si vous la connaissez.')
           : 'Touchez la carte pour ajouter les autres coins.');
     $('#rMesurer').disabled = $('#rSansMesure').disabled = n < min;
@@ -518,11 +489,11 @@ function majReleve(refaire = false) {
     const nm = sel.points.filter((p) => p.src === 'mesure').length;
     $('#rAide').textContent = '';
     $('#rPts').textContent = estMesure(sel) ? 'Position mesurée sur place. Glissez-le sur la carte pour le déplacer.'
-      : estPlace(sel) ? 'Placé à la main avec les distances. Glissez-le pour l’ajuster, ou « Mesurer la position » depuis deux repères.'
-        : `Position estimée (${nm} point${nm > 1 ? 's' : ''} mesuré${nm > 1 ? 's' : ''} sur ${sel.points.length}). Glissez-le sur la carte en suivant les distances, ou utilisez « Mesurer la position ».`;
-    $('#rRemesurer').textContent = estMesure(sel) ? 'Remesurer' : 'Mesurer la position';
+      : estPlace(sel) ? 'Placé avec les distances à vos repères. « Replacer » pour reprendre point par point, ou glissez-le en entier sur la carte.'
+        : `Position estimée (${nm} point${nm > 1 ? 's' : ''} mesuré${nm > 1 ? 's' : ''} sur ${sel.points.length}). Utilisez « Replacer » pour le positionner point par point depuis vos repères.`;
+    $('#rRemesurer').textContent = 'Replacer';
   } else {
-    $('#rAide').textContent = "Touchez la carte à l'endroit approximatif d'un élément (arbre, haie, muret…) pour l'ajouter. L'application vous proposera deux repères depuis lesquels mesurer. Touchez un élément existant pour l'ouvrir."
+    $('#rAide').textContent = "Touchez la carte à l'endroit approximatif d'un élément (arbre, haie, muret…) pour l'ajouter. Ensuite « Placer sur la carte » : vous choisissez vos repères et faites glisser chaque point à la bonne distance. Touchez un élément existant pour l'ouvrir."
       + (plan.contour.valide ? '' : ' Le contour n’est pas encore validé.');
   }
   if (obj && refaire) remplirForm(obj, !!b);
@@ -639,17 +610,16 @@ $('#rMesurer').onclick = () => {
   const b = R.brouillon;
   if (!b) return;
   b.nom ||= nomParDefaut(b.type);
-  mesurerElement(b, () => enregistrerElement(b));
+  demarrerPlacement(b, () => enregistrerElement(b));
 };
 $('#rRemesurer').onclick = () => {
   const i = R.sel;
   if (i < 0) return;
   const copie = structuredClone(plan.elements[i]);
-  R.brouillon = copie;           // affiché pendant la mesure, l'original reste intact si on arrête
+  R.brouillon = copie;           // affiché pendant le placement, l'original reste intact si on arrête
   carte.setBrouillon(copie);
-  mesurerElement(copie, () => enregistrerElement(copie, i), () => { R.brouillon = null; carte.setBrouillon(null); majReleve(); });
-};
-const bSupEl = $('#rSupprimer');
+  demarrerPlacement(copie, () => enregistrerElement(copie, i), () => { R.brouillon = null; carte.setBrouillon(null); majReleve(); });
+};const bSupEl = $('#rSupprimer');
 bSupEl.onclick = () => {
   if (R.sel < 0) return;
   if (!bSupEl.dataset.confirme) {
@@ -664,43 +634,204 @@ bSupEl.onclick = () => {
   selectionner(-1);
 };
 
-// Mesure de chaque point de l'élément, l'un après l'autre
-function mesurerElement(obj, onFini, onArret) {
-  const pts = obj.points;
-  let precedents = null; // repères du point précédent, repris s'ils conviennent encore
-  const etapePoint = (k) => {
-    if (k >= pts.length) { onFini(); return; }
-    const ajout = rel.ajoutMesure(obj);
-    // fin d'une haie / d'un muret droit de longueur connue, dont le début est mesuré :
-    // le début sert de repère A à la distance « longueur », il ne reste qu'une distance à prendre
-    const parLongueur = k === 1 && longueurConnue(obj) && pts[0].src === 'mesure';
-    const L = +obj.attrs.longueur;
-    demarrerMesure({
-      cible: pts[k],
-      titre: obj.nom,
-      sous: rel.nomPoint(obj, k),
-      prog: pts.length > 1 ? `Point ${k + 1} / ${pts.length}` : '',
-      aide: parLongueur
-        ? `La fin est à ${fmtM(L, 2)} du début (longueur indiquée) : il suffit de mesurer la distance depuis le repère B.`
-        : obj.type === 'arbre'
-          ? `Mesurez depuis chaque repère jusqu'à la face du tronc : l'application ajoute le rayon (${fmt(ajout * 100, 0)} cm${obj.attrs.tronc == null ? ', diamètre par défaut' : ''}).`
-          : obj.forme === 'ligne' ? "Visez le milieu de l'extrémité (l'axe du muret ou de la haie)." : 'Tendez le mètre depuis chaque repère jusqu’au point.',
-      ...(parLongueur ? { refFixe: { x: pts[0].x, y: pts[0].y, lib: `Début de ${obj.nom} (longueur)` }, dFixe: L } : {}),
-      ajout,
-      preferes: precedents,
-      cands: () => rel.candidats(plan, { exclureEl: obj.id, courants: pts.filter((_, j) => j !== k) }),
-      onOk: (res, info) => {
-        precedents = info.refs;
-        pts[k] = { x: res.x, y: res.y, src: 'mesure', mesure: info };
-        carte.setBrouillon(obj);
-        etapePoint(k + 1);
-      },
-      onPasser: () => etapePoint(k + 1),
-      onAnnuler: onArret,
-    });
-  };
-  etapePoint(0);
+// ---------------------------------------------------------------- Placement point par point
+// Pour chaque point (début, fin… ou centre du tronc) : on choisit un ou plusieurs repères,
+// on fait glisser le point jusqu'à la bonne distance, puis on le fixe.
+let P = null; // { obj, k, reperes, choix, verrou, snapAngle, onFini, onArret }
+
+const libAccroche = (a) => (a.contour !== undefined ? `Coin ${a.contour + 1} du contour`
+  : { picc: 'Coin du plan SPW', ligne: 'Point sur une ligne du plan SPW', element: "Point d'un élément relevé", libre: 'Point libre' }[a.src] || 'Point');
+
+function demarrerPlacement(obj, onFini, onArret) {
+  if (M) finMesure();
+  P = { obj, k: 0, reperes: [], choix: true, verrou: true, snapAngle: null, onFini, onArret };
+  majSections();
+  etapePlacement(0);
 }
+
+function etapePlacement(k) {
+  P.k = k;
+  P.choix = !P.reperes.length;   // les repères du point précédent restent proposés
+  const pt = P.obj.points[k];
+  if (k > 0) {
+    // le début a peut-être bougé : la fin reprend tout de suite la longueur (et l'angle) voulus
+    const q = contraindre(pt);
+    pt.x = Math.round(q.x * 1000) / 1000;
+    pt.y = Math.round(q.y * 1000) / 1000;
+    carte.setBrouillon(P.obj);
+  }
+  carte.setPlacement({ pt, refs: P.reperes, get choix() { return P?.choix; }, contraindre, distances: distancesPlacement });
+  const pts = [pt, ...P.reperes];
+  const xs = pts.map((p) => p.x), ys = pts.map((p) => p.y);
+  carte.cadrer(Math.min(...xs) - 8, Math.min(...ys) - 8, Math.max(...xs) + 8, Math.max(...ys) + 8);
+  majPlacement();
+}
+
+function finPlacement(ok) {
+  const p = P;
+  if (!p) return;
+  P = null;
+  carte.setPlacement(null);
+  majSections();
+  if (ok) p.onFini?.();
+  else { p.onArret?.(); if (R.brouillon) carte.setBrouillon(R.brouillon); }
+  majReleve();
+}
+
+// Distances du point vers les repères ; pour un arbre, jusqu'à la face du tronc
+function distancesPlacement() {
+  if (!P) return [];
+  const pt = P.obj.points[P.k], r0 = rel.ajoutMesure(P.obj);
+  return P.reperes.map((r, i) => {
+    const D = dist(pt, r) || 1, k = Math.min(r0 / D, 1);
+    return { p: { x: pt.x + (r.x - pt.x) * k, y: pt.y + (r.y - pt.y) * k }, q: r, d: Math.max(D - r0, 0), n: i + 1, lib: r.lib };
+  });
+}
+
+// Segment le plus proche d'un point, parmi les autres éléments, le contour et le plan SPW (à moins de 60 cm)
+function attache(pt) {
+  let best = null;
+  const essai = (a, b, lib) => {
+    const q = projSeg(pt, a, b), d = dist(q, pt);
+    if (d < 0.6 && dist(a, b) > 0.2 && (!best || d < best.d)) best = { a, b, lib, d };
+  };
+  for (const e of plan.elements) {
+    if (e === P.obj || (P.obj.id && e.id === P.obj.id) || e.forme === 'point') continue;
+    const p = e.points, n = e.forme === 'surface' ? p.length : p.length - 1;
+    for (let i = 0; i < n; i++) essai(p[i], p[(i + 1) % p.length], e.nom);
+  }
+  const c = plan.contour.points;
+  for (let i = 0; i < (plan.contour.ferme ? c.length : c.length - 1); i++) essai(c[i], c[(i + 1) % c.length], 'Bord du terrain');
+  for (const o of plan.picc.objets) {
+    if (!['haie', 'muret', 'cloture', 'voirie', 'batiment'].includes(o.k) || o.t === 'p') continue;
+    for (const r of o.t === 'a' ? o.g : [o.g]) {
+      if (Math.abs(r[0][0] - pt.x) > 200 || Math.abs(r[0][1] - pt.y) > 200) continue;
+      for (let i = 0; i < r.length - 1; i++) essai({ x: r[i][0], y: r[i][1] }, { x: r[i + 1][0], y: r[i + 1][1] }, `${libPicc(o)} (plan SPW)`);
+    }
+  }
+  return best;
+}
+// Angle entre deux droites, de 0 à 90°
+function angleEntre(ux, uy, vx, vy) {
+  const n = Math.hypot(ux, uy) * Math.hypot(vx, vy);
+  return n ? Math.acos(Math.min(1, Math.abs(ux * vx + uy * vy) / n)) * 180 / Math.PI : 0;
+}
+
+// Contraintes pendant le déplacement : longueur indiquée, puis angle droit / alignement avec l'élément voisin
+function contraindre(a) {
+  const pts = P.obj.points, k = P.k, prec = k > 0 ? pts[k - 1] : null;
+  let q = { x: a.x, y: a.y };
+  P.snapAngle = null;
+  if (!prec) return q;
+  const L = +P.obj.attrs.longueur;
+  if (P.verrou && L > 0 && pts.length === 2) {
+    const d = dist(q, prec) || 1;
+    q = { x: prec.x + (q.x - prec.x) / d * L, y: prec.y + (q.y - prec.y) / d * L };
+  }
+  const att = attache(prec);
+  if (att) {
+    const ux = q.x - prec.x, uy = q.y - prec.y, len = Math.hypot(ux, uy);
+    const vx = att.b.x - att.a.x, vy = att.b.y - att.a.y, lv = Math.hypot(vx, vy);
+    const ang = angleEntre(ux, uy, vx, vy);
+    for (const cible of [90, 0]) {
+      if (len < 0.3 || Math.abs(ang - cible) > 3) continue;
+      let dx = cible === 90 ? -vy / lv : vx / lv, dy = cible === 90 ? vx / lv : vy / lv;
+      if (dx * ux + dy * uy < 0) { dx = -dx; dy = -dy; }
+      q = { x: prec.x + dx * len, y: prec.y + dy * len };
+      P.snapAngle = cible;
+    }
+  }
+  return q;
+}
+
+function majPlacement() {
+  if (!P) return;
+  majSuite();
+  const { obj, k } = P, pts = obj.points, pt = pts[k], n = pts.length;
+  $('#plProg').textContent = n > 1 ? `Point ${k + 1} / ${n}` : '';
+  $('#plProg').hidden = n <= 1;
+  $('#plTitre').textContent = obj.nom;
+  $('#plSous').textContent = `· ${rel.nomPoint(obj, k)}`;
+  $('#plAide').textContent = P.choix
+    ? (P.reperes.length ? 'Touchez sur la carte un repère de plus.' : 'Touchez sur la carte le repère depuis lequel vous mesurez : coin de bâtiment, poteau, coin du terrain, élément déjà placé…')
+      + ' Il s’accroche au plan.'
+    : (obj.type === 'arbre'
+      ? "Faites glisser le point orange (centre du tronc) jusqu'à ce que chaque distance corresponde à votre mesure jusqu'à la face du tronc. Puis « Fixer ce point »."
+      : "Faites glisser le point orange jusqu'à ce que la distance corresponde à votre mesure. Vous pouvez aussi toucher la carte pour y amener le point. Puis « Fixer ce point ».")
+      + ' Touchez un repère sur la carte pour le retirer.';
+  // repères et distances en direct
+  const ds = distancesPlacement();
+  $('#plReperes').replaceChildren(...ds.map((r, i) => {
+    const li = document.createElement('li');
+    li.innerHTML = '<span></span><b></b><button type="button" aria-label="Retirer ce repère" title="Retirer ce repère">×</button>';
+    li.querySelector('span').textContent = `R${r.n} · ${r.lib}`;
+    li.querySelector('b').textContent = fmtM(r.d, 2);
+    li.querySelector('button').onclick = () => { P.reperes.splice(i, 1); if (!P.reperes.length) P.choix = true; majPlacement(); carte.dessinerOverlay(); };
+    return li;
+  }));
+  $('#plAjRep').textContent = P.choix ? (P.reperes.length ? 'Annuler l’ajout' : 'Choisissez un repère sur la carte') : 'Ajouter un repère';
+  $('#plAjRep').setAttribute('aria-pressed', P.choix);
+  $('#plAjRep').disabled = P.choix && !P.reperes.length;
+  // longueur et angle
+  const prec = k > 0 ? pts[k - 1] : null, L = +obj.attrs.longueur;
+  $('#plLong').textContent = prec ? `Longueur : ${fmtM(dist(prec, pt), 2)}${L > 0 ? ` (indiquée ${fmtM(L, 2)})` : ''}` : '';
+  $('#plVerrouLib').hidden = !(prec && L > 0 && n === 2);
+  $('#plVerrou').checked = P.verrou;
+  const angles = [];
+  const voisin = prec || pts[k + 1];
+  if (voisin && dist(voisin, pt) > 0.3) {
+    const ux = pt.x - voisin.x, uy = pt.y - voisin.y;
+    for (const [lieu, quoi] of [[prec, 'au début'], [pt, 'ici']]) {
+      if (!lieu) continue;
+      const att = attache(lieu);
+      if (!att) continue;
+      const ang = angleEntre(ux, uy, att.b.x - att.a.x, att.b.y - att.a.y);
+      angles.push(`Angle avec ${att.lib} (${quoi}) : ${fmt(ang, 1)}°${lieu === prec && P.snapAngle != null ? (P.snapAngle === 90 ? ' · calé à angle droit' : ' · calé dans l’alignement') : ''}`);
+    }
+  }
+  $('#plAngle').textContent = angles.join(' — ');
+  $('#plFixer').disabled = P.choix;
+  $('#plFixer').textContent = k + 1 < n ? 'Fixer ce point' : 'Fixer ce point et terminer';
+  $('#plPrec').hidden = k === 0;
+  carte.dessinerOverlay();
+}
+
+function tapPlacement(a) {
+  const pt = P.obj.points[P.k];
+  // toucher un repère existant le retire
+  const i = P.reperes.findIndex((r) => Math.hypot(r.x - a.x, r.y - a.y) < 0.3);
+  if (i >= 0) { P.reperes.splice(i, 1); if (!P.reperes.length) P.choix = true; majPlacement(); return; }
+  if (P.choix) {
+    if (dist(a, pt) < 0.05) return;
+    P.reperes.push({ x: a.x, y: a.y, lib: libAccroche(a) });
+    P.choix = false;
+  } else {
+    const q = contraindre(a);
+    pt.x = Math.round(q.x * 1000) / 1000;
+    pt.y = Math.round(q.y * 1000) / 1000;
+    carte.setBrouillon(P.obj);
+  }
+  majPlacement();
+}
+
+carte.onPlacement = () => majPlacement();
+$('#plAjRep').onclick = () => { if (!P) return; P.choix = !P.choix || !P.reperes.length; majPlacement(); };
+$('#plVerrou').onchange = () => {
+  if (!P) return;
+  P.verrou = $('#plVerrou').checked;
+  if (P.verrou) { const pt = P.obj.points[P.k], q = contraindre(pt); pt.x = q.x; pt.y = q.y; carte.setBrouillon(P.obj); }
+  majPlacement();
+};
+$('#plFixer').onclick = () => {
+  if (!P || P.choix) return;
+  const pt = P.obj.points[P.k];
+  pt.src = 'place';
+  delete pt.mesure;
+  if (P.k + 1 < P.obj.points.length) etapePlacement(P.k + 1);
+  else finPlacement(true);
+};
+$('#plPrec').onclick = () => { if (P && P.k > 0) etapePlacement(P.k - 1); };
+$('#plAnnuler').onclick = () => finPlacement(false);
 
 // ---------------------------------------------------------------- Mesure par deux distances
 let modeAvantMesure = null;
@@ -1474,6 +1605,7 @@ window.addEventListener('afterprint', () => { $('#impression').replaceChildren()
 document.addEventListener('keydown', (e) => {
   if (vPlan.hidden || e.target.matches?.('input, textarea, select')) return;
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); annuler(); }
+  else if (e.key === 'Escape' && P) { if (P.choix && P.reperes.length) { P.choix = false; majPlacement(); } else finPlacement(false); }
   else if (e.key === 'Escape' && RT.actif && !M) finRetrait();
   else if (e.key === 'Escape' && M) { if (M.choix != null) { M.choix = null; majMesure(); } else $('#mAnnuler').click(); }
   else if (e.key === 'Escape' && R.brouillon && etape === 2) annulerBrouillon();
