@@ -14,6 +14,8 @@ Application web pour relever un terrain et préparer l'aménagement d'un événe
 | Aménagement : catalogue (+ éléments sur mesure), déplacement, rotation au degré, « Aligner sur… » | fait |
 | Aménagement : points d'attention, liste du matériel, surfaces | fait |
 | Plan SPW : année de relevé dans la légende, retrait des éléments disparus (et remise) | fait |
+| Distances en direct aux éléments proches (aménagement) | fait |
+| Partage d'un plan par lien (copie chez le destinataire) | fait |
 | Synchronisation PC / téléphone | à décider |
 | Impression / PDF (A4, échelle 1:200 à 1:1000, listes en 2e page) | fait |
 | Vue 3D en consultation (Three.js, terrain plat) | fait |
@@ -33,6 +35,7 @@ Puis ouvrir http://localhost:8080 dans le navigateur.
 - `js/app.js` : écrans, formulaire, panneaux du contour, du relevé et de la mesure
 - `js/carte.js` : carte (déplacement, zoom, aimant, édition du contour, dessin des éléments et des repères)
 - `js/releve.js` : types d'éléments, choix des deux repères, calcul de position (trilatération)
+- `js/lien.js` : partage d'un plan par lien (plan compressé après `#plan=`, jamais envoyé à un serveur)
 - `js/vue3d.js` : vue 3D (chargée à la demande depuis cdn.jsdelivr.net, Three.js 0.160)
 - `js/impression.js` : mise en page imprimable (plan à l'échelle en millimètres, listes)
 - `js/amenagement.js` : catalogue, rectangles tournés, alertes (chevauchements, haies, arbres…), liste du matériel

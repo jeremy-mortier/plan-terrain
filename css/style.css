@@ -303,6 +303,9 @@ svg.leg { flex: none; overflow: visible; }
 .coches { border: 1px solid var(--trait); border-radius: 6px; margin: 0; padding: 8px 12px 10px; display: flex; flex-direction: column; gap: 6px; }
 .coches legend { font-size: 12.5px; color: var(--gris); padding: 0 4px; }
 #impression { display: none; }
+textarea { width: 100%; padding: 6px 9px; border: 1px solid var(--trait); border-radius: 6px; background: var(--fond); font: 12px var(--f-chiffre); color: var(--encre); resize: vertical; word-break: break-all; }
+.recu { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.recu p { margin: 0; }
 
 /* ---------------- Impression : seule la mise en page #impression sort sur papier */
 @media print {

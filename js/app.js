@@ -5,6 +5,7 @@ import { aire, perimetre, seRecoupe, fmtM, fmtM2, fmt, dist } from './geom.js';
 import * as rel from './releve.js';
 import * as am from './amenagement.js';
 import * as imp from './impression.js';
+import * as lien from './lien.js';
 
 const $ = (s) => document.querySelector(s);
 const RAYON_ZONE = 150; // demi-côté de la zone chargée autour de l'adresse (m)
@@ -1240,7 +1241,83 @@ document.addEventListener('keydown', (e) => {
 // ---------------------------------------------------------------- Navigation
 function router() {
   const m = location.hash.match(/^#p-(\w+)$/);
-  if (m) ouvrirPlan(m[1]); else { plan = null; afficherAccueil(); }
+  if (m) ouvrirPlan(m[1]);
+  else { plan = null; afficherAccueil(); afficherRecu(); }
 }
+
+// ---------------------------------------------------------------- Plan reçu par lien
+let planRecu = null;
+async function afficherRecu() {
+  const box = $('#recu');
+  box.hidden = true;
+  planRecu = null;
+  if (!lien.contientPlan(location.hash)) return;
+  box.hidden = false;
+  $('#recuMsg').textContent = '';
+  $('#recuAjouter').disabled = false;
+  try {
+    planRecu = await lien.relire(location.hash);
+    $('#recuNom').textContent = planRecu.nom;
+    const n = [planRecu.elements?.length && `${planRecu.elements.length} élément(s) relevé(s)`, planRecu.amenagement?.length && `${planRecu.amenagement.length} élément(s) d'aménagement`].filter(Boolean);
+    $('#recuInfo').textContent = [adresseTexte(planRecu.adresse), ...n].filter(Boolean).join(' · ');
+  } catch (e) {
+    $('#recuNom').textContent = 'Lien illisible';
+    $('#recuInfo').textContent = '';
+    $('#recuMsg').textContent = e.message;
+    $('#recuAjouter').disabled = true;
+  }
+}
+const oublierLien = () => history.replaceState(null, '', location.pathname + location.search);
+$('#recuIgnorer').onclick = () => { oublierLien(); $('#recu').hidden = true; planRecu = null; };
+$('#recuAjouter').onclick = async () => {
+  const p = planRecu;
+  if (!p) return;
+  const b = $('#recuAjouter'), msg = $('#recuMsg');
+  b.disabled = true;
+  try {
+    // le fond SPW n'est pas dans le lien : on le recharge, puis on retire à nouveau les éléments disparus
+    const objets = await spw.chargerPICC(p.zone, p.origine, (i, n) => { msg.textContent = `Chargement du plan SPW… ${Math.round(i / n * 100)} %`; });
+    const sigs = new Set((p.picc?.retires || []).map((r) => r.sig));
+    const retires = objets.filter((o) => sigs.has(spw.signature(o))).map((o) => ({ sig: spw.signature(o), o }));
+    p.picc = { charge: new Date().toISOString(), objets: objets.filter((o) => !sigs.has(spw.signature(o))), retires };
+    if (!p.id || await store.lire(p.id)) p.id = store.nouvelId();
+    await store.enregistrer(p);
+    planRecu = null;
+    $('#recu').hidden = true;
+    location.replace(`${location.pathname}${location.search}#p-${p.id}`);
+  } catch (e) {
+    msg.textContent = e.message;
+    b.disabled = false;
+  }
+};
+
+// ---------------------------------------------------------------- Partager le plan ouvert
+$('#pPartager').onclick = async () => {
+  if (!plan) return;
+  const dlg = $('#dlgPartage');
+  $('#ptMsg').textContent = '';
+  $('#ptLien').value = 'Préparation du lien…';
+  dlg.showModal();
+  let adresseLien;
+  try { adresseLien = location.origin + location.pathname + await lien.fabriquer(plan); }
+  catch { $('#ptLien').value = ''; $('#ptInfo').textContent = "Ce navigateur ne sait pas préparer de lien de partage. Utilisez « Exporter » et envoyez le fichier."; return; }
+  $('#ptLien').value = adresseLien;
+  const local = /^(localhost|127\.|\[::1\])/.test(location.hostname);
+  const infos = [`La personne qui ouvre ce lien reçoit une copie du plan « ${plan.nom} » (contour, relevé, aménagement) et peut l'ajouter à ses plans. Le fond SPW se recharge chez elle.`];
+  if (local) infos.push("Attention : vous êtes sur la version de test de ce PC. Ce lien ne fonctionnera que sur ce PC ; partagez depuis le site en ligne.");
+  if (adresseLien.length > lien.LIMITE) infos.push(`Ce plan est très gros (${Math.round(adresseLien.length / 1000)} 000 caractères) : le lien risque d'être coupé. Utilisez plutôt « Exporter » et envoyez le fichier.`);
+  $('#ptInfo').textContent = infos.join(' ');
+  $('#ptEnvoyer').hidden = !navigator.share;
+};
+$('#ptEnvoyer').onclick = async () => {
+  try { await navigator.share({ title: plan.nom, text: `Plan « ${plan.nom} »`, url: $('#ptLien').value }); }
+  catch (e) { if (e.name !== 'AbortError') $('#ptMsg').textContent = "L'envoi n'a pas pu s'ouvrir : copiez le lien."; }
+};
+$('#ptCopier').onclick = async () => {
+  const t = $('#ptLien');
+  try { await navigator.clipboard.writeText(t.value); }
+  catch { t.select(); document.execCommand('copy'); }
+  $('#ptMsg').textContent = 'Lien copié : collez-le dans un e-mail, un SMS ou WhatsApp.';
+};
 window.addEventListener('hashchange', router);
 router();

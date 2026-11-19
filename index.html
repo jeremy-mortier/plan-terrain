@@ -31,14 +31,25 @@
     </div>
   </header>
 
+  <section id="recu" class="carte-ui recu" hidden>
+    <h2>Plan reçu</h2>
+    <p><b id="recuNom"></b><br><span class="aide" id="recuInfo"></span></p>
+    <p class="aide">Ce plan vous a été envoyé par lien. L'ajouter en fait une copie à vous sur cet appareil : vos modifications ne changeront pas le plan de la personne qui l'a envoyé.</p>
+    <p class="aide" id="recuMsg" role="status"></p>
+    <div class="rang">
+      <button class="btn primaire" id="recuAjouter">Ajouter à mes plans</button>
+      <button class="btn" id="recuIgnorer">Ignorer</button>
+    </div>
+  </section>
+
   <section id="dlgNouveau" class="carte-ui nouveau" hidden>
     <h2>Nouveau plan</h2>
     <form id="formNouveau" autocomplete="off">
       <div class="grille-form">
-        <label class="ch-cp">Code postal<input id="nCp" inputmode="numeric" maxlength="4" pattern="\d{4}" placeholder="7620" required></label>
-        <label class="ch-rue">Rue<input id="nRue" list="listeRues" placeholder="Rue de Tournai" disabled required></label>
-        <label class="ch-num">N°<input id="nNum" placeholder="79" disabled></label>
-        <label class="ch-nom">Nom du plan<input id="nNom" placeholder="Place Verte, Hollain"></label>
+        <label class="ch-cp">Code postal<input id="nCp" inputmode="numeric" maxlength="4" pattern="\d{4}" placeholder="5000" required></label>
+        <label class="ch-rue">Rue<input id="nRue" list="listeRues" placeholder="Rue de la Gare" disabled required></label>
+        <label class="ch-num">N°<input id="nNum" placeholder="1" disabled></label>
+        <label class="ch-nom">Nom du plan<input id="nNom" placeholder="Fête du village"></label>
       </div>
       <datalist id="listeRues"></datalist>
       <p class="aide" id="nMsg" role="status">Commencez par le code postal : les rues de la commune vous seront proposées.</p>
@@ -75,6 +86,7 @@
       <button class="btn" id="bAnnuler" title="Annuler (Ctrl+Z)" disabled>Annuler</button>
       <button class="btn" id="p3d" aria-pressed="false">Vue 3D</button>
       <button class="btn" id="pImprimer">Imprimer / PDF</button>
+      <button class="btn" id="pPartager">Partager</button>
       <button class="btn" id="pExporter">Exporter</button>
     </div>
   </header>
@@ -314,6 +326,21 @@
     </aside>
   </div>
 </div>
+
+<!-- ============================================================ Partage -->
+<dialog id="dlgPartage" class="dlg">
+  <form method="dialog" class="dlg-corps">
+    <h2>Partager ce plan</h2>
+    <p class="aide" id="ptInfo"></p>
+    <label>Lien à envoyer<textarea id="ptLien" readonly rows="3"></textarea></label>
+    <p class="aide" id="ptMsg" role="status"></p>
+    <div class="rang">
+      <button class="btn primaire" type="button" id="ptEnvoyer">Envoyer…</button>
+      <button class="btn" type="button" id="ptCopier">Copier le lien</button>
+      <button class="btn" value="fermer">Fermer</button>
+    </div>
+  </form>
+</dialog>
 
 <!-- ============================================================ Impression -->
 <dialog id="dlgImpression" class="dlg">
