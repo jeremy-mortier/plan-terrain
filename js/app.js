@@ -606,6 +606,7 @@ bSupEl.onclick = () => {
 // Mesure de chaque point de l'élément, l'un après l'autre
 function mesurerElement(obj, onFini, onArret) {
   const pts = obj.points;
+  let precedents = null; // repères du point précédent, repris s'ils conviennent encore
   const etapePoint = (k) => {
     if (k >= pts.length) { onFini(); return; }
     const ajout = rel.ajoutMesure(obj);
@@ -625,8 +626,10 @@ function mesurerElement(obj, onFini, onArret) {
           : obj.forme === 'ligne' ? "Visez le milieu de l'extrémité (l'axe du muret ou de la haie)." : 'Tendez le mètre depuis chaque repère jusqu’au point.',
       ...(parLongueur ? { refFixe: { x: pts[0].x, y: pts[0].y, lib: `Début de ${obj.nom} (longueur)` }, dFixe: L } : {}),
       ajout,
+      preferes: precedents,
       cands: () => rel.candidats(plan, { exclureEl: obj.id, courants: pts.filter((_, j) => j !== k) }),
       onOk: (res, info) => {
+        precedents = info.refs;
         pts[k] = { x: res.x, y: res.y, src: 'mesure', mesure: info };
         carte.setBrouillon(obj);
         etapePoint(k + 1);
@@ -643,13 +646,17 @@ let modeAvantMesure = null;
 
 function demarrerMesure(o) {
   const cands = o.cands();
+  // un repère du point précédent est réutilisable s'il n'est pas sur la cible et croise bien
+  const bonAngle = (A, B) => A && B && dist(A, o.cible) >= 0.5 && dist(B, o.cible) >= 0.5 && dist(A, B) >= 0.3 && rel.sinAngle(o.cible, A, B) >= 0.34;
+  const prec = (o.preferes || []).map((r) => ({ ...r, lib: r.lib.replace(/ \(même repère\)$/, '') + ' (même repère)' }));
   let paire;
   if (o.refFixe) {
-    const B = rel.choisirAvec(o.cible, o.refFixe, cands);
+    const B = prec.filter((r) => bonAngle(o.refFixe, r)).sort((a, b) => rel.sinAngle(o.cible, o.refFixe, b) - rel.sinAngle(o.cible, o.refFixe, a))[0]
+      || rel.choisirAvec(o.cible, o.refFixe, cands);
     paire = B ? [o.refFixe, B] : null;
     M = { ...o, cands, refs: [o.refFixe, B], choix: B ? null : 1, res: null };
   } else {
-    paire = rel.choisirReperes(o.cible, cands);
+    paire = prec.length === 2 && bonAngle(prec[0], prec[1]) ? prec : rel.choisirReperes(o.cible, cands);
     M = { ...o, cands, refs: paire ? [paire[0], paire[1]] : [null, null], choix: paire ? null : 0, res: null };
   }
   modeAvantMesure ??= carte.mode;
@@ -735,8 +742,11 @@ function choisirRepereSur(a, p, e) {
   }
   if (!best) return;
   const autre = m.refs[1 - m.choix];
-  if (autre && dist(autre, best) < 0.05) return;
-  if (dist(best, m.cible) < 0.3) return;
+  if (autre && dist(autre, best) < 0.05) {
+    $('#mAide').textContent = `Ce point est déjà le repère ${'AB'[1 - m.choix]}. Il faut deux repères différents : deux distances prises du même endroit ne donnent qu'un cercle, pas une position. Touchez un autre point.`;
+    return;
+  }
+  if (dist(best, m.cible) < 0.3) { $('#mAide').textContent = "C'est le point à mesurer lui-même : choisissez un autre repère."; return; }
   m.refs[m.choix] = best;
   $(`#mD${m.choix}`).value = '';
   m.choix = !m.refs[1] ? 1 : !m.refs[0] ? 0 : null;

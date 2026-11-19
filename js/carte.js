@@ -607,7 +607,7 @@ export class Carte {
     const a = this.survol;
     const montrer = edit || (this.mode === 'releve' && !(this.mesure && this.mesure.choix == null));
     if (a && montrer) {
-      if (this.mode === 'releve' && this.brouillon && this.brouillon.forme !== 'point' && this.brouillon.points.length) {
+      if (this.mode === 'releve' && !this.mesure && this.brouillon && this.brouillon.forme !== 'point' && this.brouillon.points.length) {
         const l = this.versEcran(this.brouillon.points[this.brouillon.points.length - 1]), q = this.versEcran(a);
         el('line', { x1: l.x, y1: l.y, x2: q.x, y2: q.y, class: 'elastique' }, o);
       }
