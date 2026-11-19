@@ -151,14 +151,13 @@ const carte = new Carte($('#carte'), {
 });
 
 function pousserHisto() {
-  histo.push(JSON.stringify({ contour: plan.contour, elements: plan.elements, amenagement: plan.amenagement, retires: resumeRetires(plan.picc.retires) }));
+  histo.push(JSON.stringify({ contour: plan.contour, elements: plan.elements, amenagement: plan.amenagement, retires: resumeRetires(plan.picc.retires), cotes: plan.cotes }));
   if (histo.length > 60) histo.shift();
   $('#bAnnuler').disabled = false;
 }
 
 function annuler() {
   if (!histo.length) return;
-  if (P) finPlacement(false);
   const retraitActif = RT.actif;
   if (retraitActif) finRetrait();
   if (M) finMesure();
@@ -168,6 +167,8 @@ function annuler() {
   plan.contour = h.contour;
   plan.elements = h.elements;
   plan.amenagement = h.amenagement || [];
+  plan.cotes = h.cotes || plan.cotes || [];
+  majCotes();
   if (A.sel >= plan.amenagement.length) A.sel = -1;
   retablirRetires(h.retires || []);
   finAlignement();
@@ -200,11 +201,11 @@ async function ouvrirPlan(id) {
   plan = p;
   plan.elements ||= [];
   plan.amenagement ||= [];
+  plan.cotes ||= [];
   plan.picc.retires ||= [];
   RT = { actif: false, sel: -1, modeAvant: null };
   histo = [];
   if (M) finMesure();
-  if (P) { P = null; carte.setPlacement(null); }
   R = { sel: -1, brouillon: null, dernierType: R.dernierType };
   A = { sel: -1, aligner: false };
   etape = !plan.contour.valide ? 1 : plan.amenagement.length ? 3 : 2;
@@ -221,6 +222,8 @@ async function ouvrirPlan(id) {
   carte.setContour(plan.contour);
   requestAnimationFrame(() => recadrer());
   majLegende();
+  outilCote(false);
+  majCotes();
   allerEtape(etape);
 }
 
@@ -230,17 +233,15 @@ const modeEtape = () => etape === 3 ? 'amenager' : etape === 2 ? 'releve' : plan
 // Sections du panneau visibles selon l'étape (la mesure en cours prend toute la place)
 const SECTIONS = { 1: ['sContour'], 2: ['sReleve'], 3: ['sAmenag', 'sAlertes', 'sCatalogue', 'sMateriel'] };
 function majSections() {
-  const plein = !!M || RT.actif || !!P;
+  const plein = !!M || RT.actif;
   for (const [n, ids] of Object.entries(SECTIONS)) for (const id of ids) $(`#${id}`).hidden = plein || +n !== etape;
   $('#sMesure').hidden = !M;
-  $('#sPlacer').hidden = !P;
   $('#sRetrait').hidden = !RT.actif || !!M;
   carte.glisserElements = etape === 2 && !RT.actif && !M;
   if (plan) majSuite();
 }
 
 function allerEtape(n) {
-  if (P) finPlacement(false);
   if (RT.actif) finRetrait();
   if (M) finMesure();
   if (R.brouillon) annulerBrouillon();
@@ -373,30 +374,33 @@ bEff.onclick = () => {
 $('#cAimant').onchange = (e) => { carte.aimant = e.target.checked; };
 
 // ---------------------------------------------------------------- Relevé des éléments
-const pt = (a) => ({ x: a.x, y: a.y, src: 'estime' });
+// Même principe que l'aménagement : on touche la carte, l'élément est créé à ses dimensions,
+// puis on le fait glisser et tourner en lisant en direct les distances aux éléments proches.
 const estMesure = (e) => e.points.every((p) => p.src === 'mesure');
 const estPlace = (e) => !estMesure(e) && e.points.every((p) => p.src === 'mesure' || p.src === 'place');
 const etatEl = (e) => (estMesure(e) ? 'mesuré' : estPlace(e) ? 'placé' : 'estimé');
+const elSel = () => (plan && R.sel >= 0 ? plan.elements[R.sel] : null);
+const libAccroche = (a) => (a.contour !== undefined ? `Coin ${a.contour + 1} du contour`
+  : { picc: 'Coin du plan SPW', ligne: 'Point sur une ligne du plan SPW', element: "Point d'un élément relevé", libre: 'Point libre' }[a.src] || 'Point');
 
 function tapReleve(a, p, e) {
-  if (P) { tapPlacement(a); return; }
   if (M) { if (M.choix != null) choisirRepereSur(a, p, e); return; }
-  const b = R.brouillon;
-  if (b) {
-    if (b.forme === 'point') b.points = [pt(a)];
-    else b.points.push(pt(a));
-    ajusterLongueur(b);
-    carte.setBrouillon(b);
-    majReleve();
-    return;
-  }
+  if (R.aligner) { alignerReleve(p, e); return; }
   const i = carte.elementSous(p.x, p.y, e);
   if (i >= 0) { selectionner(i); return; }
-  if (R.sel >= 0) { R.sel = -1; carte.setElements(plan.elements, -1); } // ferme la fiche ouverte et pose directement
+  creerElement(a);
+}
+
+// Crée l'élément du dernier type utilisé, centré là où on a touché
+function creerElement(a) {
+  pousserHisto();
   const type = R.dernierType || 'arbre';
-  R.brouillon = { type, forme: rel.TYPES[type].forme || R.derniereForme || 'point', nom: '', attrs: {}, points: [pt(a)] };
-  carte.setBrouillon(R.brouillon);
-  majReleve(true);
+  const forme = rel.TYPES[type].forme || R.derniereForme || 'point';
+  const e = { id: store.nouvelId(), type, forme, nom: nomParDefaut(type), attrs: {}, rot: R.derniereRot ?? 0, points: [], cree: new Date().toISOString() };
+  rel.geometrie(e, { x: a.x, y: a.y });
+  plan.elements.push(e);
+  sauver();
+  selectionner(plan.elements.length - 1);
 }
 
 // Sur téléphone, le panneau est sous la carte : un bouton sur la carte y emmène
@@ -404,10 +408,8 @@ function majSuite() {
   const b = $('#suite');
   let txt = '', cible = null;
   if (M) { txt = 'Saisir les distances ↓'; cible = '#sMesure'; }
-  else if (P) { txt = P.choix ? 'Choisir un repère sur la carte ↓' : 'Distances et « Fixer ce point » ↓'; cible = '#sPlacer'; }
   else if (RT.actif && RT.sel >= 0) { txt = 'Retirer cet élément ↓'; cible = '#sRetrait'; }
-  else if (etape === 2 && R.brouillon) { txt = `${rel.TYPES[R.brouillon.type].lib} posé · compléter la fiche ↓`; cible = '#rForm'; }
-  else if (etape === 2 && R.sel >= 0) { txt = 'Voir la fiche ↓'; cible = '#rForm'; }
+  else if (etape === 2 && R.sel >= 0) { txt = 'Fiche et distances ↓'; cible = '#rForm'; }
   else if (etape === 3 && A.sel >= 0) { txt = 'Voir la fiche ↓'; cible = '#aFiche'; }
   b.hidden = !txt;
   b.textContent = txt;
@@ -418,26 +420,16 @@ $('#suite').onclick = () => {
   if (c) $(c).scrollIntoView({ behavior: 'smooth', block: 'start' });
 };
 
-// Haie ou muret droit dont la longueur est connue : la fin est placée à cette distance du début,
-// dans la direction indiquée sur la carte
-const longueurConnue = (b) => b.forme === 'ligne' && b.points.length === 2 && +b.attrs.longueur > 0;
-function ajusterLongueur(b) {
-  if (!longueurConnue(b)) return;
-  const [d, f] = b.points, L = +b.attrs.longueur;
-  const n = Math.hypot(f.x - d.x, f.y - d.y) || 1, ux = n > 0.01 ? (f.x - d.x) / n : 1, uy = n > 0.01 ? (f.y - d.y) / n : 0;
-  b.points[1] = { ...f, x: Math.round((d.x + ux * L) * 1000) / 1000, y: Math.round((d.y + uy * L) * 1000) / 1000 };
-}
-
 function selectionner(i) {
+  if (i !== R.sel) finAlignementReleve();
   R.sel = i;
   carte.setElements(plan.elements, i);
   majReleve(true);
 }
 
-function annulerBrouillon() {
+function annulerBrouillon() {   // ancien mode de saisie : plus utilisé, gardé pour les appels existants
   R.brouillon = null;
   carte.setBrouillon(null);
-  majReleve();
 }
 
 function nomParDefaut(type) {
@@ -459,45 +451,27 @@ function resume(e) {
   return parts.join(' · ');
 }
 
-// Panneau du relevé ; « refaire » reconstruit le formulaire (nouvel objet affiché)
+// Panneau du relevé ; « refaire » reconstruit la fiche (autre élément affiché)
 function majReleve(refaire = false) {
   if (!plan) return;
   majSuite();
-  const els = plan.elements, b = R.brouillon, sel = R.sel >= 0 ? els[R.sel] : null;
-  const nMes = els.filter(estMesure).length;
-  $('#rEtat').textContent = els.length ? `${nMes} mesuré${nMes > 1 ? 's' : ''} sur ${els.length}` : 'Aucun élément';
-  $('#rEtat').className = 'pastille' + (els.length && nMes === els.length ? ' ok' : '');
-  const obj = b || sel;
-  $('#rForm').hidden = !obj;
-  $('#rBoutonsNouveau').hidden = !b;
-  $('#rBoutonsSel').hidden = !sel || !!b;
-  if (b) {
-    const min = rel.MIN_POINTS[b.forme], n = b.points.length;
-    $('#rAide').textContent = "Choisissez le type et donnez les dimensions connues. Vous pouvez les compléter plus tard.";
-    $('#rPts').textContent = b.forme === 'point'
-      ? 'Position approximative posée. Touchez la carte pour la déplacer.'
-      : `${n} point${n > 1 ? 's' : ''} posé${n > 1 ? 's' : ''}${n >= 2 && b.forme === 'ligne' ? ` (${fmtM(perimetre(b.points, false), 1)})` : ''}. `
-        + (b.forme === 'ligne'
-          ? (+b.attrs.longueur > 0
-            ? (n === 1 ? `Touchez la carte dans la direction de la fin : elle sera placée à ${fmtM(+b.attrs.longueur, 2)} du début.` : n === 2 ? 'Fin placée à la longueur indiquée. Cliquez sur « Placer sur la carte » pour ajuster le début puis la fin depuis vos repères.' : 'Le tracé tourne : placez ensuite chaque point depuis vos repères.')
-            : 'Touchez la carte pour ajouter la fin (et les points intermédiaires si le tracé tourne). Indiquez la longueur si vous la connaissez.')
-          : 'Touchez la carte pour ajouter les autres coins.');
-    $('#rMesurer').disabled = $('#rSansMesure').disabled = n < min;
-    $('#rRetirerPt').hidden = b.forme === 'point';
-    $('#rRetirerPt').disabled = n <= 1;
-  } else if (sel) {
-    const nm = sel.points.filter((p) => p.src === 'mesure').length;
-    $('#rAide').textContent = '';
-    $('#rPts').textContent = estMesure(sel) ? 'Position mesurée sur place. Glissez-le sur la carte pour le déplacer.'
-      : estPlace(sel) ? 'Placé avec les distances à vos repères. « Replacer » pour reprendre point par point, ou glissez-le en entier sur la carte.'
-        : `Position estimée (${nm} point${nm > 1 ? 's' : ''} mesuré${nm > 1 ? 's' : ''} sur ${sel.points.length}). Utilisez « Replacer » pour le positionner point par point depuis vos repères.`;
-    $('#rRemesurer').textContent = 'Replacer';
-  } else {
-    $('#rAide').textContent = "Touchez la carte à l'endroit approximatif d'un élément (arbre, haie, muret…) pour l'ajouter. Ensuite « Placer sur la carte » : vous choisissez vos repères et faites glisser chaque point à la bonne distance. Touchez un élément existant pour l'ouvrir."
-      + (plan.contour.valide ? '' : ' Le contour n’est pas encore validé.');
+  const els = plan.elements, sel = elSel();
+  $('#rEtat').textContent = els.length ? `${els.length} élément${els.length > 1 ? 's' : ''}` : 'Aucun élément';
+  $('#rEtat').className = 'pastille';
+  $('#rForm').hidden = !sel;
+  $('#rAide').textContent = R.aligner
+    ? "Touchez une ligne sur la carte (mur, haie, bord de voirie, côté du terrain…) : l'élément s'alignera dessus."
+    : sel ? 'Glissez l’élément sur la carte pour le déplacer : les distances aux éléments proches s’affichent en direct. Tournez-le avec la poignée ronde (Maj : crans de 15°) ou au degré près ci-dessous.'
+      : "Touchez la carte à l'endroit d'un élément (arbre, haie, muret…) : il est créé à cet endroit, à ses dimensions. Faites-le ensuite glisser et tourner jusqu'aux bonnes distances. Touchez un élément existant pour l'ouvrir."
+        + (plan.contour.valide ? '' : ' Le contour n’est pas encore validé.');
+  if (sel) {
+    $('#rPts').textContent = estMesure(sel) ? 'Position mesurée sur place.' : '';
+    $('#rRotation').hidden = !rel.peutTourner(sel);
+    if (document.activeElement !== $('#rRot')) $('#rRot').value = fmtRot(Math.round(rel.rotationDe(sel) * 10) / 10);
+    $('#rAligner').setAttribute('aria-pressed', !!R.aligner);
+    if (refaire) remplirForm(sel);
+    majDistances(carte.distancesEl, '#rDist', '#rPortee');
   }
-  if (obj && refaire) remplirForm(obj, !!b);
-  if (obj) majDistances(carte.distancesEl, '#rDist', '#rPortee');
   // liste
   const ul = $('#rListe');
   ul.replaceChildren();
@@ -506,7 +480,7 @@ function majReleve(refaire = false) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'el-ligne' + (i === R.sel ? ' sel' : '');
-    btn.innerHTML = `<i class="pastille-el t-${e.type}"></i><span class="el-txt"><b></b><small></small></span><span class="pastille ${estMesure(e) ? 'ok' : estPlace(e) ? '' : 'attention'}">${etatEl(e)}</span>`;
+    btn.innerHTML = `<i class="pastille-el t-${e.type}"></i><span class="el-txt"><b></b><small></small></span>`;
     btn.querySelector('b').textContent = e.nom;
     btn.querySelector('small').textContent = resume(e) || rel.TYPES[e.type].lib;
     btn.onclick = () => { selectionner(i === R.sel ? -1 : i); if (i !== R.sel) return; centrerSur(e); };
@@ -521,317 +495,195 @@ function centrerSur(e) {
   carte.cadrer(Math.min(...xs) - m, Math.min(...ys) - m, Math.max(...xs) + m, Math.max(...ys) + m);
 }
 
-// Formulaire du type, de la forme et des dimensions
-function remplirForm(obj, nouveau) {
-  const types = $('#rTypes');
-  types.hidden = !nouveau;
-  types.replaceChildren(...Object.entries(rel.TYPES).map(([k, t]) => {
+// Modification de l'élément sélectionné (avec annulation, redessin et sauvegarde)
+function modifierEl(fn, refaire = false) {
+  const e = elSel();
+  if (!e) return;
+  pousserHisto();
+  fn(e);
+  carte.setElements(plan.elements, R.sel);
+  sauver();
+  majReleve(refaire);
+}
+
+// Fiche : type, forme, nom, dimensions
+function remplirForm(obj) {
+  $('#rTypes').replaceChildren(...Object.entries(rel.TYPES).map(([k, t]) => {
     const bt = Object.assign(document.createElement('button'), { type: 'button', className: 'btn', textContent: t.lib });
     bt.setAttribute('aria-pressed', obj.type === k);
     bt.onclick = () => {
-      obj.type = k;
-      R.dernierType = k;
-      obj.forme = t.forme || R.derniereForme || 'point';
-      if (obj.forme === 'point') obj.points = obj.points.slice(0, 1);
-      carte.setBrouillon(obj);
-      majReleve(true);
+      if (obj.type === k) return;
+      modifierEl((e) => {
+        const c = rel.centre(e);
+        if (new RegExp(`^${rel.TYPES[e.type].lib} \\d+$`).test(e.nom)) e.nom = nomParDefaut(k);
+        e.type = k;
+        R.dernierType = k;
+        e.forme = t.forme || R.derniereForme || 'point';
+        if (e.forme !== 'surface') delete e.rect;
+        rel.geometrie(e, c);
+      }, true);
     };
     return bt;
   }));
   const formes = $('#rFormes');
-  formes.hidden = !nouveau || obj.type !== 'autre';
+  formes.hidden = obj.type !== 'autre';
   formes.replaceChildren(...Object.entries(rel.FORMES).map(([k, lib]) => {
-    const bt = Object.assign(document.createElement('button'), { type: 'button', className: 'btn petit', textContent: lib });
+    const bt = Object.assign(document.createElement('button'), { type: 'button', className: 'btn petit', textContent: k === 'surface' ? 'Rectangle' : lib });
     bt.setAttribute('aria-pressed', obj.forme === k);
     bt.onclick = () => {
-      obj.forme = k;
-      R.derniereForme = k;
-      if (k === 'point') obj.points = obj.points.slice(0, 1);
-      carte.setBrouillon(obj);
-      majReleve(true);
+      if (obj.forme === k) return;
+      modifierEl((e) => { const c = rel.centre(e); e.forme = k; R.derniereForme = k; if (k !== 'surface') delete e.rect; rel.geometrie(e, c); }, true);
     };
     return bt;
   }));
   const nom = $('#rNom');
   nom.value = obj.nom || '';
-  nom.placeholder = nouveau ? nomParDefaut(obj.type) : '';
-  nom.onchange = () => {
-    if (!nouveau) pousserHisto();
-    obj.nom = nom.value.trim() || (nouveau ? '' : obj.nom);
-    nom.value = obj.nom;
-    if (!nouveau) { sauver(); majReleve(); }
-  };
-  const g = $('#rAttrs');
-  g.replaceChildren(...rel.TYPES[obj.type].champs.map(([cle, lib, unite, def]) => {
-    const l = document.createElement('label');
-    l.textContent = `${lib} (${unite})`;
-    const inp = Object.assign(document.createElement('input'), { inputMode: 'decimal', autocomplete: 'off' });
-    inp.value = obj.attrs[cle] != null ? String(obj.attrs[cle]).replace('.', ',') : '';
-    if (def != null) inp.placeholder = `ex. ${String(def).replace('.', ',')}`;
-    inp.onchange = () => {
-      const t = inp.value.trim().replace(',', '.');
-      const v = t === '' ? null : +t;
-      if (Number.isNaN(v) || (v !== null && v < 0)) { inp.setCustomValidity('Nombre attendu'); inp.reportValidity(); return; }
-      inp.setCustomValidity('');
-      if (!nouveau) pousserHisto();
-      if (v === null) delete obj.attrs[cle]; else obj.attrs[cle] = v;
-      if (nouveau) { ajusterLongueur(obj); carte.setBrouillon(obj); majReleve(); }
-      else { carte.setElements(plan.elements, R.sel); sauver(); majReleve(); }
-    };
-    l.append(inp);
-    return l;
-  }));
+  nom.onchange = () => { const v = nom.value.trim(); if (v) modifierEl((e) => { e.nom = v; }); else nom.value = obj.nom; };
+  $('#rAttrs').replaceChildren(...rel.TYPES[obj.type].champs
+    .filter(([cle]) => !(cle === 'longueur' && obj.forme === 'point'))
+    .map(([cle, lib, unite, def]) => {
+      const l = document.createElement('label');
+      l.textContent = `${lib} (${unite})`;
+      const inp = Object.assign(document.createElement('input'), { inputMode: 'decimal', autocomplete: 'off' });
+      const actuel = cle === 'longueur' && obj.attrs.longueur == null && obj.forme === 'ligne' ? Math.round(rel.longueurDe(obj) * 100) / 100 : obj.attrs[cle];
+      inp.value = actuel != null ? String(actuel).replace('.', ',') : '';
+      if (def != null) inp.placeholder = `ex. ${String(def).replace('.', ',')}`;
+      inp.onchange = () => {
+        const t = inp.value.trim().replace(',', '.');
+        const v = t === '' ? null : +t;
+        if (Number.isNaN(v) || (v !== null && v < 0)) { inp.setCustomValidity('Nombre attendu'); inp.reportValidity(); return; }
+        inp.setCustomValidity('');
+        modifierEl((e) => {
+          if (v === null) delete e.attrs[cle]; else e.attrs[cle] = v;
+          // longueur ou largeur : l'élément est redessiné autour de son centre
+          if ((cle === 'longueur' || cle === 'largeur') && rel.peutTourner(e)) rel.geometrie(e);
+        });
+      };
+      l.append(inp);
+      return l;
+    }));
 }
 
-$('#rAnnulerForm').onclick = annulerBrouillon;
-$('#rRetirerPt').onclick = () => {
-  const b = R.brouillon;
-  if (!b || b.points.length <= 1) return;
-  b.points.pop();
-  carte.setBrouillon(b);
+// Rotation de l'élément sélectionné (champ, crans, 0°, 90°, « Aligner sur… »)
+function tournerEl(delta, absolu) {
+  const e = elSel();
+  if (!e || !rel.peutTourner(e)) return;
+  modifierEl((x) => { x.rot = am.normRot(absolu ?? rel.rotationDe(x) + delta); R.derniereRot = x.rot; rel.geometrie(x); });
+}
+$('#rRot').onchange = () => {
+  const v = lireNombre($('#rRot').value);
+  if (Number.isNaN(v)) { majReleve(); return; }
+  tournerEl(0, v);
+};
+$('#rRot').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#rRot').blur(); });
+document.querySelectorAll('[data-rrot]').forEach((b) => { b.onclick = () => tournerEl(+b.dataset.rrot); });
+$('#rRot0').onclick = () => tournerEl(0, 0);
+$('#rAligner').onclick = () => {
+  R.aligner = !R.aligner;
+  carte.alignement = R.aligner;
+  carte.segSurvol = null;
   majReleve();
+  carte.dessinerOverlay();
 };
-$('#rFermerSel').onclick = () => selectionner(-1);
-
-// Enregistre le brouillon (ou remplace l'élément remesuré)
-function enregistrerElement(obj, index = -1) {
-  pousserHisto();
-  obj.nom ||= nomParDefaut(obj.type);
-  if (index >= 0) plan.elements[index] = obj;
-  else { obj.id = store.nouvelId(); obj.cree = new Date().toISOString(); plan.elements.push(obj); index = plan.elements.length - 1; }
-  R.brouillon = null;
-  carte.setBrouillon(null);
-  sauver();
-  selectionner(index);
+function finAlignementReleve() {
+  if (!R.aligner) return;
+  R.aligner = false;
+  carte.alignement = false;
+  carte.segSurvol = null;
+}
+function alignerReleve(p, e) {
+  const s = carte.segmentSous(p.x, p.y, e);
+  if (!s) return;
+  finAlignementReleve();
+  tournerEl(0, am.rotationAlignee(s[0], s[1]));
 }
 
-$('#rSansMesure').onclick = () => { const b = R.brouillon; if (b) enregistrerElement(b); };
-$('#rMesurer').onclick = () => {
-  const b = R.brouillon;
-  if (!b) return;
-  b.nom ||= nomParDefaut(b.type);
-  demarrerPlacement(b, () => enregistrerElement(b));
+$('#rFermerSel').onclick = () => selectionner(-1);
+$('#rDupliquer').onclick = () => {
+  const e = elSel();
+  if (!e) return;
+  pousserHisto();
+  const c = structuredClone(e);
+  c.id = store.nouvelId();
+  c.nom = nomParDefaut(c.type);
+  c.cree = new Date().toISOString();
+  c.points = c.points.map((p) => ({ ...p, x: p.x + 1, y: p.y - 1, src: 'place' }));
+  plan.elements.push(c);
+  sauver();
+  selectionner(plan.elements.length - 1);
 };
-$('#rRemesurer').onclick = () => {
-  const i = R.sel;
-  if (i < 0) return;
-  const copie = structuredClone(plan.elements[i]);
-  R.brouillon = copie;           // affiché pendant le placement, l'original reste intact si on arrête
-  carte.setBrouillon(copie);
-  demarrerPlacement(copie, () => enregistrerElement(copie, i), () => { R.brouillon = null; carte.setBrouillon(null); majReleve(); });
-};const bSupEl = $('#rSupprimer');
-bSupEl.onclick = () => {
+function supprimerElement() {
   if (R.sel < 0) return;
-  if (!bSupEl.dataset.confirme) {
-    bSupEl.dataset.confirme = '1'; bSupEl.textContent = 'Confirmer la suppression';
-    setTimeout(() => { delete bSupEl.dataset.confirme; bSupEl.textContent = 'Supprimer'; }, 4000);
-    return;
-  }
-  delete bSupEl.dataset.confirme; bSupEl.textContent = 'Supprimer';
   pousserHisto();
   plan.elements.splice(R.sel, 1);
   sauver();
   selectionner(-1);
-};
-
-// ---------------------------------------------------------------- Placement point par point
-// Pour chaque point (début, fin… ou centre du tronc) : on choisit un ou plusieurs repères,
-// on fait glisser le point jusqu'à la bonne distance, puis on le fixe.
-let P = null; // { obj, k, reperes, choix, verrou, snapAngle, onFini, onArret }
-
-const libAccroche = (a) => (a.contour !== undefined ? `Coin ${a.contour + 1} du contour`
-  : { picc: 'Coin du plan SPW', ligne: 'Point sur une ligne du plan SPW', element: "Point d'un élément relevé", libre: 'Point libre' }[a.src] || 'Point');
-
-function demarrerPlacement(obj, onFini, onArret) {
-  if (M) finMesure();
-  P = { obj, k: 0, reperes: [], choix: true, verrou: true, snapAngle: null, onFini, onArret };
-  majSections();
-  etapePlacement(0);
 }
+$('#rSupprimer').onclick = supprimerElement;
+// ---------------------------------------------------------------- Outil « Mesurer » : cotes entre deux points
+// Bouton ↔ sur la carte : on touche deux points (ils s'accrochent au plan), la distance s'affiche.
+// « Garder la cote » la laisse sur le plan ; la carte « Cotes » permet de les afficher ou non et de les effacer.
+const C = { actif: false };
+const r3 = (v) => Math.round(v * 1000) / 1000;
+carte.onCote = (a) => tapCote(a);
 
-function etapePlacement(k) {
-  P.k = k;
-  P.choix = !P.reperes.length;   // les repères du point précédent restent proposés
-  const pt = P.obj.points[k];
-  if (k > 0) {
-    // le début a peut-être bougé : la fin reprend tout de suite la longueur (et l'angle) voulus
-    const q = contraindre(pt);
-    pt.x = Math.round(q.x * 1000) / 1000;
-    pt.y = Math.round(q.y * 1000) / 1000;
-    carte.setBrouillon(P.obj);
-  }
-  carte.setPlacement({ pt, refs: P.reperes, get choix() { return P?.choix; }, contraindre, distances: distancesPlacement });
-  const pts = [pt, ...P.reperes];
-  const xs = pts.map((p) => p.x), ys = pts.map((p) => p.y);
-  carte.cadrer(Math.min(...xs) - 8, Math.min(...ys) - 8, Math.max(...xs) + 8, Math.max(...ys) + 8);
-  majPlacement();
-}
-
-function finPlacement(ok) {
-  const p = P;
-  if (!p) return;
-  P = null;
-  carte.setPlacement(null);
-  majSections();
-  if (ok) p.onFini?.();
-  else { p.onArret?.(); if (R.brouillon) carte.setBrouillon(R.brouillon); }
-  majReleve();
-}
-
-// Distances du point vers les repères ; pour un arbre, jusqu'à la face du tronc
-function distancesPlacement() {
-  if (!P) return [];
-  const pt = P.obj.points[P.k], r0 = rel.ajoutMesure(P.obj);
-  return P.reperes.map((r, i) => {
-    const D = dist(pt, r) || 1, k = Math.min(r0 / D, 1);
-    return { p: { x: pt.x + (r.x - pt.x) * k, y: pt.y + (r.y - pt.y) * k }, q: r, d: Math.max(D - r0, 0), n: i + 1, lib: r.lib };
-  });
-}
-
-// Segment le plus proche d'un point, parmi les autres éléments, le contour et le plan SPW (à moins de 60 cm)
-function attache(pt) {
-  let best = null;
-  const essai = (a, b, lib) => {
-    const q = projSeg(pt, a, b), d = dist(q, pt);
-    if (d < 0.6 && dist(a, b) > 0.2 && (!best || d < best.d)) best = { a, b, lib, d };
-  };
-  for (const e of plan.elements) {
-    if (e === P.obj || (P.obj.id && e.id === P.obj.id) || e.forme === 'point') continue;
-    const p = e.points, n = e.forme === 'surface' ? p.length : p.length - 1;
-    for (let i = 0; i < n; i++) essai(p[i], p[(i + 1) % p.length], e.nom);
-  }
-  const c = plan.contour.points;
-  for (let i = 0; i < (plan.contour.ferme ? c.length : c.length - 1); i++) essai(c[i], c[(i + 1) % c.length], 'Bord du terrain');
-  for (const o of plan.picc.objets) {
-    if (!['haie', 'muret', 'cloture', 'voirie', 'batiment'].includes(o.k) || o.t === 'p') continue;
-    for (const r of o.t === 'a' ? o.g : [o.g]) {
-      if (Math.abs(r[0][0] - pt.x) > 200 || Math.abs(r[0][1] - pt.y) > 200) continue;
-      for (let i = 0; i < r.length - 1; i++) essai({ x: r[i][0], y: r[i][1] }, { x: r[i + 1][0], y: r[i + 1][1] }, `${libPicc(o)} (plan SPW)`);
-    }
-  }
-  return best;
-}
-// Angle entre deux droites, de 0 à 90°
-function angleEntre(ux, uy, vx, vy) {
-  const n = Math.hypot(ux, uy) * Math.hypot(vx, vy);
-  return n ? Math.acos(Math.min(1, Math.abs(ux * vx + uy * vy) / n)) * 180 / Math.PI : 0;
-}
-
-// Contraintes pendant le déplacement : longueur indiquée, puis angle droit / alignement avec l'élément voisin
-function contraindre(a) {
-  const pts = P.obj.points, k = P.k, prec = k > 0 ? pts[k - 1] : null;
-  let q = { x: a.x, y: a.y };
-  P.snapAngle = null;
-  if (!prec) return q;
-  const L = +P.obj.attrs.longueur;
-  if (P.verrou && L > 0 && pts.length === 2) {
-    const d = dist(q, prec) || 1;
-    q = { x: prec.x + (q.x - prec.x) / d * L, y: prec.y + (q.y - prec.y) / d * L };
-  }
-  const att = attache(prec);
-  if (att) {
-    const ux = q.x - prec.x, uy = q.y - prec.y, len = Math.hypot(ux, uy);
-    const vx = att.b.x - att.a.x, vy = att.b.y - att.a.y, lv = Math.hypot(vx, vy);
-    const ang = angleEntre(ux, uy, vx, vy);
-    for (const cible of [90, 0]) {
-      if (len < 0.3 || Math.abs(ang - cible) > 3) continue;
-      let dx = cible === 90 ? -vy / lv : vx / lv, dy = cible === 90 ? vx / lv : vy / lv;
-      if (dx * ux + dy * uy < 0) { dx = -dx; dy = -dy; }
-      q = { x: prec.x + dx * len, y: prec.y + dy * len };
-      P.snapAngle = cible;
-    }
-  }
-  return q;
-}
-
-function majPlacement() {
-  if (!P) return;
-  majSuite();
-  const { obj, k } = P, pts = obj.points, pt = pts[k], n = pts.length;
-  $('#plProg').textContent = n > 1 ? `Point ${k + 1} / ${n}` : '';
-  $('#plProg').hidden = n <= 1;
-  $('#plTitre').textContent = obj.nom;
-  $('#plSous').textContent = `· ${rel.nomPoint(obj, k)}`;
-  $('#plAide').textContent = P.choix
-    ? (P.reperes.length ? 'Touchez sur la carte un repère de plus.' : 'Touchez sur la carte le repère depuis lequel vous mesurez : coin de bâtiment, poteau, coin du terrain, élément déjà placé…')
-      + ' Il s’accroche au plan.'
-    : (obj.type === 'arbre'
-      ? "Faites glisser le point orange (centre du tronc) jusqu'à ce que chaque distance corresponde à votre mesure jusqu'à la face du tronc. Puis « Fixer ce point »."
-      : "Faites glisser le point orange jusqu'à ce que la distance corresponde à votre mesure. Vous pouvez aussi toucher la carte pour y amener le point. Puis « Fixer ce point ».")
-      + ' Touchez un repère sur la carte pour le retirer.';
-  // repères et distances en direct
-  const ds = distancesPlacement();
-  $('#plReperes').replaceChildren(...ds.map((r, i) => {
-    const li = document.createElement('li');
-    li.innerHTML = '<span></span><b></b><button type="button" aria-label="Retirer ce repère" title="Retirer ce repère">×</button>';
-    li.querySelector('span').textContent = `R${r.n} · ${r.lib}`;
-    li.querySelector('b').textContent = fmtM(r.d, 2);
-    li.querySelector('button').onclick = () => { P.reperes.splice(i, 1); if (!P.reperes.length) P.choix = true; majPlacement(); carte.dessinerOverlay(); };
-    return li;
-  }));
-  $('#plAjRep').textContent = P.choix ? (P.reperes.length ? 'Annuler l’ajout' : 'Choisissez un repère sur la carte') : 'Ajouter un repère';
-  $('#plAjRep').setAttribute('aria-pressed', P.choix);
-  $('#plAjRep').disabled = P.choix && !P.reperes.length;
-  // longueur et angle
-  const prec = k > 0 ? pts[k - 1] : null, L = +obj.attrs.longueur;
-  $('#plLong').textContent = prec ? `Longueur : ${fmtM(dist(prec, pt), 2)}${L > 0 ? ` (indiquée ${fmtM(L, 2)})` : ''}` : '';
-  $('#plVerrouLib').hidden = !(prec && L > 0 && n === 2);
-  $('#plVerrou').checked = P.verrou;
-  const angles = [];
-  const voisin = prec || pts[k + 1];
-  if (voisin && dist(voisin, pt) > 0.3) {
-    const ux = pt.x - voisin.x, uy = pt.y - voisin.y;
-    for (const [lieu, quoi] of [[prec, 'au début'], [pt, 'ici']]) {
-      if (!lieu) continue;
-      const att = attache(lieu);
-      if (!att) continue;
-      const ang = angleEntre(ux, uy, att.b.x - att.a.x, att.b.y - att.a.y);
-      angles.push(`Angle avec ${att.lib} (${quoi}) : ${fmt(ang, 1)}°${lieu === prec && P.snapAngle != null ? (P.snapAngle === 90 ? ' · calé à angle droit' : ' · calé dans l’alignement') : ''}`);
-    }
-  }
-  $('#plAngle').textContent = angles.join(' — ');
-  $('#plFixer').disabled = P.choix;
-  $('#plFixer').textContent = k + 1 < n ? 'Fixer ce point' : 'Fixer ce point et terminer';
-  $('#plPrec').hidden = k === 0;
+function outilCote(on) {
+  C.actif = on;
+  carte.outilCote = on;
+  carte.coteTemp = on ? { a: null, b: null } : null;
+  if (!on) carte.setSurvol(null);
+  $('#zMesurer').setAttribute('aria-pressed', on);
+  majCoteBarre();
   carte.dessinerOverlay();
 }
-
-function tapPlacement(a) {
-  const pt = P.obj.points[P.k];
-  // toucher un repère existant le retire
-  const i = P.reperes.findIndex((r) => Math.hypot(r.x - a.x, r.y - a.y) < 0.3);
-  if (i >= 0) { P.reperes.splice(i, 1); if (!P.reperes.length) P.choix = true; majPlacement(); return; }
-  if (P.choix) {
-    if (dist(a, pt) < 0.05) return;
-    P.reperes.push({ x: a.x, y: a.y, lib: libAccroche(a) });
-    P.choix = false;
-  } else {
-    const q = contraindre(a);
-    pt.x = Math.round(q.x * 1000) / 1000;
-    pt.y = Math.round(q.y * 1000) / 1000;
-    carte.setBrouillon(P.obj);
-  }
-  majPlacement();
+function tapCote(a) {
+  const t = carte.coteTemp, p = { x: r3(a.x), y: r3(a.y) };
+  if (!t.a || t.b) carte.coteTemp = { a: p, b: null };
+  else t.b = p;
+  majCoteBarre();
+  carte.dessinerOverlay();
 }
-
-carte.onPlacement = () => majPlacement();
-$('#plAjRep').onclick = () => { if (!P) return; P.choix = !P.choix || !P.reperes.length; majPlacement(); };
-$('#plVerrou').onchange = () => {
-  if (!P) return;
-  P.verrou = $('#plVerrou').checked;
-  if (P.verrou) { const pt = P.obj.points[P.k], q = contraindre(pt); pt.x = q.x; pt.y = q.y; carte.setBrouillon(P.obj); }
-  majPlacement();
+function majCoteBarre() {
+  $('#coteBarre').hidden = !C.actif;
+  if (!C.actif) return;
+  const t = carte.coteTemp, fini = t.a && t.b;
+  $('#coteTxt').textContent = !t.a ? 'Touchez le premier point' : !fini ? 'Touchez le second point' : 'Distance :';
+  $('#coteVal').textContent = fini ? fmtM(dist(t.a, t.b), 2) : '';
+  $('#coteGarder').hidden = $('#coteNouv').hidden = !fini;
+}
+function majCotes() {
+  if (!plan) return;
+  const l = plan.cotes;
+  carte.cotes = l;
+  carte.cotesVisibles = plan.cotesVisibles !== false;
+  $('#sCotes').hidden = !l.length;
+  $('#cotesVis').checked = carte.cotesVisibles;
+  $('#cotesListe').replaceChildren(...l.map((c, i) => {
+    const li = document.createElement('li');
+    li.innerHTML = '<span></span><b></b><button type="button" title="Effacer cette cote" aria-label="Effacer cette cote">×</button>';
+    li.querySelector('span').textContent = `Cote ${i + 1}`;
+    li.querySelector('b').textContent = fmtM(dist(c.a, c.b), 2);
+    li.querySelector('button').onclick = () => { pousserHisto(); plan.cotes.splice(i, 1); sauver(); majCotes(); carte.dessinerOverlay(); };
+    return li;
+  }));
+}
+$('#zMesurer').onclick = () => outilCote(!C.actif);
+$('#coteFin').onclick = () => outilCote(false);
+$('#coteNouv').onclick = () => { carte.coteTemp = { a: null, b: null }; majCoteBarre(); carte.dessinerOverlay(); };
+$('#coteGarder').onclick = () => {
+  const t = carte.coteTemp;
+  if (!t?.a || !t.b) return;
+  pousserHisto();
+  plan.cotes.push({ a: t.a, b: t.b });
+  plan.cotesVisibles = true;
+  carte.coteTemp = { a: null, b: null };
+  sauver();
+  majCotes();
+  majCoteBarre();
+  carte.dessinerOverlay();
 };
-$('#plFixer').onclick = () => {
-  if (!P || P.choix) return;
-  const pt = P.obj.points[P.k];
-  pt.src = 'place';
-  delete pt.mesure;
-  if (P.k + 1 < P.obj.points.length) etapePlacement(P.k + 1);
-  else finPlacement(true);
-};
-$('#plPrec').onclick = () => { if (P && P.k > 0) etapePlacement(P.k - 1); };
-$('#plAnnuler').onclick = () => finPlacement(false);
+$('#cotesVis').onchange = () => { plan.cotesVisibles = $('#cotesVis').checked; sauver(); majCotes(); carte.dessinerOverlay(); };
+$('#cotesEffacer').onclick = () => { pousserHisto(); plan.cotes = []; sauver(); majCotes(); carte.dessinerOverlay(); };
 
 // ---------------------------------------------------------------- Mesure par deux distances
 let modeAvantMesure = null;
@@ -1039,15 +891,18 @@ carte.calculDistancesEl = (e) => am.distancesElement(plan, e, +$('#rPortee').val
 $('#rPortee').onchange = () => { carte.dessinerOverlay(); majDistances(carte.distancesEl, '#rDist', '#rPortee'); };
 
 // Glisser un élément relevé (en saisie ou sélectionné) : il devient « placé à la main »
-carte.onElement = (evt, cible) => {
-  const el = cible === 'brouillon' ? R.brouillon : plan.elements[cible];
+carte.onElement = (evt, i) => {
+  const el = plan.elements[i];
   if (!el) return;
-  if (evt === 'debut' && cible !== 'brouillon') pousserHisto();
-  else if (evt === 'bouge') majDistances(carte.distancesEl, '#rDist', '#rPortee');
-  else if (evt === 'fin') {
+  if (evt === 'select') selectionner(i);
+  else if (evt === 'debut') pousserHisto();
+  else if (evt === 'bouge') {
+    majDistances(carte.distancesEl, '#rDist', '#rPortee');
+    if (document.activeElement !== $('#rRot')) $('#rRot').value = fmtRot(Math.round(rel.rotationDe(el) * 10) / 10);
+  } else if (evt === 'fin') {
     el.points.forEach((p) => { p.src = 'place'; delete p.mesure; });
-    if (cible === 'brouillon') carte.setBrouillon(el);
-    else { carte.setElements(plan.elements, R.sel); sauver(); }
+    carte.setElements(plan.elements, R.sel);
+    sauver();
     majReleve();
   }
 };
@@ -1605,12 +1460,18 @@ window.addEventListener('afterprint', () => { $('#impression').replaceChildren()
 document.addEventListener('keydown', (e) => {
   if (vPlan.hidden || e.target.matches?.('input, textarea, select')) return;
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); annuler(); }
-  else if (e.key === 'Escape' && P) { if (P.choix && P.reperes.length) { P.choix = false; majPlacement(); } else finPlacement(false); }
+  else if (e.key === 'Escape' && C.actif) outilCote(false);
   else if (e.key === 'Escape' && RT.actif && !M) finRetrait();
   else if (e.key === 'Escape' && M) { if (M.choix != null) { M.choix = null; majMesure(); } else $('#mAnnuler').click(); }
   else if (e.key === 'Escape' && R.brouillon && etape === 2) annulerBrouillon();
   else if (e.key === 'Escape' && R.sel >= 0 && etape === 2) selectionner(-1);
   else if (e.key === 'Escape' && carte.mode === 'tracer') { carte.setMode('naviguer'); majPanneau(); }
+  else if (etape === 2 && e.key === 'Escape' && R.aligner) { finAlignementReleve(); majReleve(); carte.dessinerOverlay(); }
+  else if (etape === 2 && elSel() && (e.key === 'ArrowLeft' || e.key === 'ArrowRight') && rel.peutTourner(elSel())) {
+    e.preventDefault();
+    tournerEl((e.key === 'ArrowLeft' ? -1 : 1) * (e.shiftKey ? 15 : 1));
+  }
+  else if (etape === 2 && elSel() && (e.key === 'Delete' || e.key === 'Backspace')) { e.preventDefault(); supprimerElement(); }
   else if (etape === 3 && e.key === 'Escape') { if (A.aligner) finAlignement(); else { A.sel = -1; majAmenag(); } }
   else if (etape === 3 && objSel() && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
     e.preventDefault();

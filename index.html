@@ -98,10 +98,12 @@
         <button id="zPlus" aria-label="Zoomer">+</button>
         <button id="zMoins" aria-label="Dézoomer">−</button>
         <button id="zCadrer" aria-label="Recadrer" title="Recadrer">⌖</button>
+        <button id="zMesurer" aria-pressed="false" aria-label="Mesurer une distance" title="Mesurer une distance entre deux points">↔</button>
       </div>
       <div class="flottant nord" aria-label="Nord en haut">▲<br>N</div>
       <div class="flottant echelle"><span id="echTxt">10 m</span><i id="echBarre"></i></div>
       <div class="flottant survol" id="infoSurvol" hidden></div>
+      <div class="flottant cote-barre" id="coteBarre" hidden><span id="coteTxt"></span><b id="coteVal"></b><button class="btn petit primaire" type="button" id="coteGarder" hidden>Garder la cote</button><button class="btn petit" type="button" id="coteNouv" hidden>Nouvelle mesure</button><button class="btn petit" type="button" id="coteFin">Terminer</button></div>
       <button class="flottant suite" id="suite" type="button" hidden></button>
       <div class="flottant attrib">© <a href="https://geoportail.wallonie.be" target="_blank" rel="noopener">SPW</a> – PICC</div>
       <div id="vue3d" class="vue3d" hidden>
@@ -151,28 +153,6 @@
         </div>
       </section>
 
-      <!-- Placement point par point d'un élément relevé, à la distance de repères choisis -->
-      <section class="carte-ui mesure" id="sPlacer" hidden>
-        <div class="rang entre">
-          <h2>Placer sur la carte</h2>
-          <span class="pastille" id="plProg"></span>
-        </div>
-        <p class="m-titre"><b id="plTitre"></b> <span id="plSous"></span></p>
-        <p class="aide" id="plAide"></p>
-        <ul class="pl-reperes" id="plReperes"></ul>
-        <div class="rang">
-          <button class="btn petit" type="button" id="plAjRep" aria-pressed="false">Ajouter un repère</button>
-        </div>
-        <p class="m-res" id="plLong"></p>
-        <label class="coche" id="plVerrouLib"><input type="checkbox" id="plVerrou" checked> Garder la longueur indiquée</label>
-        <p class="pl-angle" id="plAngle"></p>
-        <div class="rang">
-          <button class="btn primaire" type="button" id="plFixer">Fixer ce point</button>
-          <button class="btn" type="button" id="plPrec">Point précédent</button>
-          <button class="btn" type="button" id="plAnnuler">Arrêter</button>
-        </div>
-      </section>
-
       <!-- Retrait d'éléments du plan SPW qui n'existent plus -->
       <section class="carte-ui mesure" id="sRetrait" hidden>
         <div class="rang entre">
@@ -218,14 +198,22 @@
             </div>
             <ul id="rDist"></ul>
           </div>
-          <div class="rang" id="rBoutonsNouveau">
-            <button class="btn primaire" id="rMesurer" type="button">Placer sur la carte</button>
-            <button class="btn" id="rSansMesure" type="button">Enregistrer tel quel</button>
-            <button class="btn" id="rRetirerPt" type="button">Retirer le dernier point</button>
-            <button class="btn" id="rAnnulerForm" type="button">Annuler</button>
+          <div class="rotation" id="rRotation">
+            <label>Rotation (degrés, sens horaire)<input id="rRot" inputmode="decimal" autocomplete="off"></label>
+            <div class="rang crans">
+              <button class="btn" type="button" data-rrot="-15">−15°</button>
+              <button class="btn" type="button" data-rrot="-1">−1°</button>
+              <button class="btn" type="button" data-rrot="1">+1°</button>
+              <button class="btn" type="button" data-rrot="15">+15°</button>
+            </div>
+            <div class="rang">
+              <button class="btn petit" type="button" id="rRot0">Remettre à 0°</button>
+              <button class="btn petit" type="button" data-rrot="90">Pivoter de 90°</button>
+              <button class="btn petit" type="button" id="rAligner" aria-pressed="false">Aligner sur…</button>
+            </div>
           </div>
-          <div class="rang" id="rBoutonsSel">
-            <button class="btn primaire" id="rRemesurer" type="button">Replacer</button>
+          <div class="rang">
+            <button class="btn" id="rDupliquer" type="button">Dupliquer</button>
             <button class="btn" id="rFermerSel" type="button">Fermer</button>
             <button class="btn petit danger" id="rSupprimer" type="button">Supprimer</button>
           </div>
@@ -358,6 +346,15 @@
           <label class="coche"><input type="checkbox" id="cAimant" checked> Aimant sur le plan SPW</label>
           <button class="btn petit danger" id="cEffacer" hidden>Tout effacer</button>
         </div>
+      </section>
+
+      <section class="carte-ui" id="sCotes" hidden>
+        <div class="rang entre">
+          <h2>Cotes</h2>
+          <label class="coche"><input type="checkbox" id="cotesVis" checked> Afficher sur le plan</label>
+        </div>
+        <ul class="cotes-liste" id="cotesListe"></ul>
+        <div class="rang"><button class="btn petit danger" type="button" id="cotesEffacer">Effacer toutes les cotes</button></div>
       </section>
 
       <section class="carte-ui">

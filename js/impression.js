@@ -116,6 +116,16 @@ function planSVG(plan, opts, N) {
         + '</text>');
     }
   }
+  // cotes gardées par l'utilisateur
+  if (plan.cotesVisibles !== false) for (const c of plan.cotes || []) {
+    const ax = X(c.a.x), ay = Y(c.a.y), bx = X(c.b.x), by = Y(c.b.y), L = Math.hypot(bx - ax, by - ay);
+    if (!L) continue;
+    const nx = -(by - ay) / L * 1.2, ny = (bx - ax) / L * 1.2;
+    let ang = Math.atan2(by - ay, bx - ax) * 180 / Math.PI;
+    if (ang > 90) ang -= 180; if (ang < -90) ang += 180;
+    out.push(`<path class="i-cote-u" d="M${ax} ${ay}L${bx} ${by}M${n2(ax + nx)} ${n2(ay + ny)}L${n2(ax - nx)} ${n2(ay - ny)}M${n2(bx + nx)} ${n2(by + ny)}L${n2(bx - nx)} ${n2(by - ny)}"/>`);
+    t((ax + bx) / 2 - Math.sin(ang * Math.PI / 180) * -1.4, (ay + by) / 2 - Math.cos(ang * Math.PI / 180) * 1.4, `${fmt(dist(c.a, c.b), 2)} m`, 'i-cote-u-t', ang);
+  }
   // nord et échelle
   const L = [1, 2, 5, 10, 20, 50, 100, 200].find((m) => m * k >= 20) || 200;
   const bx = 4, by = F.h - 5, lw = n2(L * k);

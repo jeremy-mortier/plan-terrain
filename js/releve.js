@@ -10,9 +10,9 @@ export const TYPES = {
     lib: 'Arbre', forme: 'point',
     champs: [['tronc', 'Ø du tronc', 'cm', 30], ['couronne', 'Ø de la couronne', 'm', 4], ['branches', 'Hauteur des 1res branches', 'm', null], ['hauteur', 'Hauteur totale', 'm', null]],
   },
-  haie: { lib: 'Haie', forme: 'ligne', champs: [['longueur', 'Longueur', 'm', null], ['epaisseur', 'Épaisseur', 'm', 0.8], ['hauteur', 'Hauteur', 'm', null]] },
-  muret: { lib: 'Muret', forme: 'ligne', champs: [['longueur', 'Longueur', 'm', null], ['epaisseur', 'Épaisseur', 'm', 0.2], ['hauteur', 'Hauteur', 'm', null]] },
-  autre: { lib: 'Autre', forme: null, champs: [['largeur', 'Largeur ou Ø', 'm', 0.5], ['hauteur', 'Hauteur', 'm', null]] },
+  haie: { lib: 'Haie', forme: 'ligne', champs: [['longueur', 'Longueur', 'm', 5], ['epaisseur', 'Épaisseur', 'm', 0.8], ['hauteur', 'Hauteur', 'm', null]] },
+  muret: { lib: 'Muret', forme: 'ligne', champs: [['longueur', 'Longueur', 'm', 5], ['epaisseur', 'Épaisseur', 'm', 0.2], ['hauteur', 'Hauteur', 'm', null]] },
+  autre: { lib: 'Autre', forme: null, champs: [['longueur', 'Longueur', 'm', 3], ['largeur', 'Largeur ou Ø', 'm', 0.5], ['hauteur', 'Hauteur', 'm', null]] },
 };
 
 export const FORMES = { point: 'Point', ligne: 'Ligne', surface: 'Surface' };
@@ -23,6 +23,50 @@ export const valeur = (e, cle) => {
   if (v !== undefined && v !== null && v !== '') return +v;
   return TYPES[e.type].champs.find((c) => c[0] === cle)?.[3] ?? null;
 };
+
+// ---------------------------------------------------------------- Géométrie (comme l'aménagement)
+// Un élément a un centre, une rotation (degrés, sens horaire, 0 = longueur vers le nord) et ses dimensions.
+// Ses points sont recalculés à partir de là.
+export const centre = (e) => ({
+  x: e.points.reduce((s, p) => s + p.x, 0) / e.points.length,
+  y: e.points.reduce((s, p) => s + p.y, 0) / e.points.length,
+});
+
+// Peut-on le faire tourner et le redimensionner ? (haies et murets droits, rectangles)
+export const peutTourner = (e) => (e.forme === 'ligne' && e.points.length === 2) || (e.forme === 'surface' && e.rect);
+
+// Rotation actuelle ; pour un ancien élément sans rotation, déduite de ses deux points
+export function rotationDe(e) {
+  if (e.rot != null) return e.rot;
+  if (e.forme === 'ligne' && e.points.length === 2) {
+    const [a, b] = e.points;
+    return ((Math.atan2(b.x - a.x, b.y - a.y) * 180 / Math.PI) + 360) % 180;
+  }
+  return 0;
+}
+
+// Longueur actuelle d'une haie ou d'un muret droit
+export const longueurDe = (e) => (e.forme === 'ligne' && e.points.length === 2 ? dist(e.points[0], e.points[1]) : 0);
+
+const r3 = (v) => Math.round(v * 1000) / 1000;
+
+// Recalcule les points autour du centre c (par défaut le centre actuel)
+export function geometrie(e, c = e.points.length ? centre(e) : { x: 0, y: 0 }) {
+  e.rot = rotationDe(e);
+  const a = e.rot * Math.PI / 180, ux = Math.sin(a), uy = Math.cos(a);   // direction de la longueur
+  const P = (x, y) => ({ x: r3(x), y: r3(y), src: 'place' });
+  if (e.forme === 'point') e.points = [P(c.x, c.y)];
+  else if (e.forme === 'ligne') {
+    const L = +e.attrs.longueur > 0 ? +e.attrs.longueur : longueurDe(e) || valeur(e, 'longueur') || 5;
+    e.points = [P(c.x - ux * L / 2, c.y - uy * L / 2), P(c.x + ux * L / 2, c.y + uy * L / 2)];
+  } else {
+    // rectangle : largeur perpendiculaire à la longueur
+    const l = valeur(e, 'longueur') || 3, w = valeur(e, 'largeur') || 2, vx = uy, vy = -ux;
+    e.rect = true;
+    e.points = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([i, j]) => P(c.x + vx * i * w / 2 + ux * j * l / 2, c.y + vy * i * w / 2 + uy * j * l / 2));
+  }
+  return e;
+}
 
 // Distance à ajouter aux mesures : on mesure jusqu'à la face du tronc, le point est au centre.
 export const ajoutMesure = (e) => (e.type === 'arbre' ? (valeur(e, 'tronc') || 0) / 200 : 0);

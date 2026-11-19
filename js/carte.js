@@ -2,7 +2,7 @@
 // Repère : mètres locaux, x vers l'est, y vers le nord. L'écran a y vers le bas.
 
 import { dist, projSeg } from './geom.js';
-import { valeur } from './releve.js';
+import { valeur, centre, rotationDe, peutTourner, geometrie, longueurDe } from './releve.js';
 import { coins, local, normRot, estMarche, travees, facade, aFacade, estRemorque, TIMON } from './amenagement.js';
 
 const NS = 'http://www.w3.org/2000/svg';
@@ -287,13 +287,20 @@ export class Carte {
   }
 
   // Élément relevé qu'on peut faire glisser sous le doigt : celui en cours de saisie ou celui sélectionné
+  // (comme en aménagement : on attrape directement n'importe quel élément ; le sélectionné a priorité)
   cibleGlisser(p, e) {
-    if (!this.glisserElements || this.placement) return null;
+    if (!this.glisserElements || this.alignement) return null;
     const m = this.versMonde(p.x, p.y), r = this.rayon(e);
-    if (this.brouillon && this.distanceEcran(this.brouillon, m) < r) return 'brouillon';
     const el = this.elements[this.selEl];
     if (el && this.distanceEcran(el, m) < r) return this.selEl;
-    return null;
+    const i = this.elementSous(p.x, p.y, e);
+    return i >= 0 ? i : null;
+  }
+
+  // Poignée de rotation d'un élément relevé (haie, muret, rectangle), au-delà de son bout « nord »
+  poigneeElement(el) {
+    const c = centre(el), l = el.forme === 'ligne' ? longueurDe(el) : (valeur(el, 'longueur') || 3);
+    return this.poignee({ x: c.x, y: c.y, rot: rotationDe(el), l });
   }
 
   setMode(mode) {
@@ -431,13 +438,24 @@ export class Carte {
       return;
     }
     if (this.pointeurs.size > 2) return;
+    // outil « Mesurer » : on ne prend aucun objet, une touche pose un point, glisser déplace la carte
+    if (this.outilCote) { this.geste = { type: 'pan', depart: p, dernier: p, bouge: false }; return; }
     if (this.mode === 'releve' && this.placement && !this.placement.choix) {
       const q = this.versEcran(this.placement.pt);
       if (Math.hypot(q.x - p.x, q.y - p.y) < this.rayon(e) + 14) { this.geste = { type: 'placer', depart: p, bouge: false }; return; }
     }
     if (this.mode === 'releve' && !this.mesure) {
+      const sel = this.elements[this.selEl];
+      if (sel && peutTourner(sel) && !this.alignement && this.glisserElements) {
+        const h = this.poigneeElement(sel);
+        if (Math.hypot(h.x - p.x, h.y - p.y) < this.rayon(e)) { this.geste = { type: 'rotEl', i: this.selEl, bouge: false }; return; }
+      }
       const cible = this.cibleGlisser(p, e);
-      if (cible != null) { this.geste = { type: 'element', cible, depart: p, dernier: this.versMonde(p.x, p.y), bouge: false }; return; }
+      if (cible != null) {
+        this.geste = { type: 'element', cible, depart: p, dernier: this.versMonde(p.x, p.y), bouge: false };
+        if (cible !== this.selEl) this.onElement?.('select', cible);
+        return;
+      }
     }
     if (this.mode === 'amenager' && !this.alignement) {
       const o = this.objets[this.selObj];
@@ -473,7 +491,8 @@ export class Carte {
     const p = this.pos(e);
     if (!this.pointeurs.has(e.pointerId)) {
       // survol à la souris
-      if (e.pointerType === 'mouse' && this.mode === 'amenager') this.survolAmenag(p, e);
+      if (e.pointerType === 'mouse' && this.outilCote) this.setSurvol(this.accrocher(p.x, p.y, e));
+      else if (e.pointerType === 'mouse' && (this.mode === 'amenager' || (this.mode === 'releve' && this.alignement))) this.survolAmenag(p, e);
       else if (e.pointerType === 'mouse' && this.mode !== 'naviguer') this.setSurvol(this.accrocher(p.x, p.y, e));
       return;
     }
@@ -507,6 +526,17 @@ export class Carte {
         this.placement.pt.y = Math.round(pos.y * 1000) / 1000;
         this.setBrouillon(this.brouillon);
         this.onPlacement?.('bouge');
+      }
+    } else if (g.type === 'rotEl') {
+      const el = this.elements[g.i], c = this.versEcran(centre(el));
+      const pas = e.shiftKey ? 15 : 1;
+      const r = normRot(Math.round(Math.atan2(p.x - c.x, c.y - p.y) * 180 / Math.PI / pas) * pas);
+      if (r !== el.rot) {
+        if (!g.bouge) { g.bouge = true; this.onElement?.('debut', g.i); }
+        el.rot = r;
+        geometrie(el);
+        this.setElements(this.elements, this.selEl);
+        this.onElement?.('bouge', g.i);
       }
     } else if (g.type === 'element') {
       if (!g.bouge && Math.hypot(p.x - g.depart.x, p.y - g.depart.y) > 5) { g.bouge = true; this.onElement?.('debut', g.cible); }
@@ -564,6 +594,7 @@ export class Carte {
       if (g.bouge) this.onPlacement?.('fin'); else this.tap(p, e);
       if (e.pointerType !== 'mouse') this.setSurvol(null);
     }
+    if (g.type === 'rotEl' && g.bouge) this.onElement?.('fin', g.i);
     if (g.type === 'element') {
       if (g.bouge) this.onElement?.('fin', g.cible);
       else this.tap(p, e);   // simple touche : comportement habituel (sélection, point suivant…)
@@ -584,6 +615,12 @@ export class Carte {
   }
 
   tap(p, e) {
+    if (this.outilCote) {
+      const a = this.accrocher(p.x, p.y, e);
+      if (e.pointerType !== 'mouse') this.setSurvol(null);
+      this.onCote?.(a);
+      return;
+    }
     if (this.mode === 'amenager') {
       this.onTap?.(null, p, e);
     } else if (this.mode === 'releve') {
@@ -673,9 +710,10 @@ export class Carte {
     }
     if (this.mode === 'releve') this.dessinerReleve(o);
     if (this.mode === 'amenager') this.dessinerAmenagOverlay(o);
+    this.dessinerCotes(o);
     // marqueur d'accrochage
     const a = this.survol;
-    const montrer = edit || (this.mode === 'releve' && !(this.mesure && this.mesure.choix == null));
+    const montrer = edit || this.outilCote || (this.mode === 'releve' && !(this.mesure && this.mesure.choix == null));
     if (a && montrer) {
       if (this.mode === 'releve' && !this.mesure && this.brouillon && this.brouillon.forme !== 'point' && this.brouillon.points.length) {
         const l = this.versEcran(this.brouillon.points[this.brouillon.points.length - 1]), q = this.versEcran(a);
@@ -725,6 +763,30 @@ export class Carte {
     }
   }
 
+  // Cotes : celles gardées sur le plan (si affichées) et celle en cours de mesure
+  dessinerCotes(o) {
+    const liste = this.cotesVisibles ? [...(this.cotes || [])] : [];
+    const t = this.coteTemp;
+    if (t?.a) liste.push({ a: t.a, b: t.b || (this.survol && this.outilCote ? this.survol : null), temp: true });
+    for (const c of liste) {
+      const pa = this.versEcran(c.a);
+      el('circle', { cx: pa.x, cy: pa.y, r: 3.5, class: `cote-bout${c.temp ? ' temp' : ''}` }, o);
+      if (!c.b) continue;
+      const pb = this.versEcran(c.b), L = Math.hypot(pb.x - pa.x, pb.y - pa.y);
+      const cls = `cote-ligne${c.temp ? ' temp' : ''}`;
+      el('line', { x1: pa.x, y1: pa.y, x2: pb.x, y2: pb.y, class: cls }, o);
+      // petits traits perpendiculaires aux bouts
+      const nx = L ? -(pb.y - pa.y) / L * 6 : 0, ny = L ? (pb.x - pa.x) / L * 6 : 0;
+      el('path', { d: `M${pa.x + nx} ${pa.y + ny}L${pa.x - nx} ${pa.y - ny}M${pb.x + nx} ${pb.y + ny}L${pb.x - nx} ${pb.y - ny}`, class: cls }, o);
+      el('circle', { cx: pb.x, cy: pb.y, r: 3.5, class: `cote-bout${c.temp ? ' temp' : ''}` }, o);
+      let ang = Math.atan2(pb.y - pa.y, pb.x - pa.x) * 180 / Math.PI;
+      if (ang > 90) ang -= 180; if (ang < -90) ang += 180;
+      const d = Math.hypot(c.b.x - c.a.x, c.b.y - c.a.y);
+      el('text', { class: `cote-txt${c.temp ? ' temp' : ''}`, transform: `translate(${(pa.x + pb.x) / 2},${(pa.y + pb.y) / 2}) rotate(${ang}) translate(0,-6)` }, o)
+        .textContent = `${fmtNb(Math.round(d * 100) / 100)} m`;
+    }
+  }
+
   // Traits de distance vers les éléments proches, avec la valeur
   dessinerDistances(o, liste, cls = 'dist') {
     for (const r of liste) {
@@ -755,6 +817,18 @@ export class Carte {
     // hors placement : distances aux éléments proches de l'élément sélectionné
     this.distancesEl = actif ? this.calculDistancesEl?.(cibleDist) || [] : [];
     this.dessinerDistances(o, this.distancesEl, 'dist');
+    // poignée de rotation de l'élément sélectionné (comme en aménagement) et ligne visée pour « Aligner sur… »
+    const selEl = this.elements[this.selEl];
+    if (selEl && peutTourner(selEl) && !this.mesure && this.glisserElements && !this.alignement) {
+      const h = this.poigneeElement(selEl);
+      el('line', { x1: h.bout.x, y1: h.bout.y, x2: h.x, y2: h.y, class: 'rot-ligne' }, o);
+      el('circle', { cx: h.x, cy: h.y, r: 8, class: 'rot-poignee' }, o);
+      el('text', { x: h.x + 14, y: h.y + 4, class: 'rot-txt' }, o).textContent = `${fmtNb(Math.round(rotationDe(selEl) * 10) / 10)}°`;
+    }
+    if (this.alignement && this.segSurvol) {
+      const [a, b] = this.segSurvol.map((q) => this.versEcran(q));
+      el('line', { x1: a.x, y1: a.y, x2: b.x, y2: b.y, class: 'seg-vise' }, o);
+    }
     if (pl) {
       // placement : distances du point vers les repères choisis, repères numérotés, point à glisser
       this.dessinerDistances(o, pl.distances(), 'rep');
