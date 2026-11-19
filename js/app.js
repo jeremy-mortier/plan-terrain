@@ -151,7 +151,7 @@ const carte = new Carte($('#carte'), {
 });
 
 function pousserHisto() {
-  histo.push(JSON.stringify({ contour: plan.contour, elements: plan.elements, amenagement: plan.amenagement, retires: plan.picc.retires.map((r) => r.sig) }));
+  histo.push(JSON.stringify({ contour: plan.contour, elements: plan.elements, amenagement: plan.amenagement, retires: resumeRetires(plan.picc.retires) }));
   if (histo.length > 60) histo.shift();
   $('#bAnnuler').disabled = false;
 }
@@ -168,7 +168,7 @@ function annuler() {
   plan.elements = h.elements;
   plan.amenagement = h.amenagement || [];
   if (A.sel >= plan.amenagement.length) A.sel = -1;
-  retablirRetires(new Set(h.retires || []));
+  retablirRetires(h.retires || []);
   finAlignement();
   carte.setContour(plan.contour);
   carte.setElements(plan.elements);
@@ -1031,9 +1031,9 @@ $('#bRecharger').onclick = async () => {
   b.disabled = true;
   try {
     const objets = await spw.chargerPICC(plan.zone, plan.origine, (i, n) => { b.textContent = `Chargement… ${Math.round(i / n * 100)} %`; });
-    // les éléments retirés par vous restent retirés
-    const retires = plan.picc.retires || [], sigs = new Set(retires.map((r) => r.sig));
-    plan.picc = { charge: new Date().toISOString(), objets: objets.filter((o) => !sigs.has(spw.signature(o))), retires };
+    // les éléments retirés (ou coupés) par vous le restent
+    const res = appliquerRetires(objets, plan.picc.retires || []);
+    plan.picc = { charge: new Date().toISOString(), ...res };
     if (RT.actif) { RT.sel = -1; majRetrait(); }
     carte.chargerPicc(plan.picc.objets);
     majLegende(); majAmenag(); sauver();
@@ -1074,6 +1074,7 @@ function finRetrait() {
   majSections();
 }
 function tapRetrait(p, e) {
+  if (RT.coupe) { tapCoupe(p, e); return; }
   RT.sel = carte.piccSous(p.x, p.y, e);
   carte.setSelPicc(RT.sel >= 0 ? plan.picc.objets[RT.sel] : null);
   majRetrait(RT.sel < 0);
@@ -1085,7 +1086,20 @@ function majRetrait(rien = false) {
     : (rien ? "Aucun élément du plan SPW à cet endroit. " : '')
       + "Touchez sur la carte l'élément qui n'existe plus : haie, arbre, muret, clôture, poteau… Vous pourrez le remettre plus tard.";
   $('#rtSel').hidden = !o;
+  if (!o) RT.coupe = null;
+  $('#rtBoutons').hidden = !!RT.coupe;
+  $('#rtCoupe').hidden = !RT.coupe;
+  $('#rtCouper').hidden = !o || o.t !== 'l';
   if (o) { $('#rtNom').textContent = libPicc(o); $('#rtInfo').textContent = infoPicc(o); }
+  if (o && RT.coupe) {
+    const c = RT.coupe, L = longueurLigne(o.g);
+    $('#rtCoupeAide').textContent = c.s.length === 0
+      ? "Touchez sur la ligne l'endroit où la partie disparue commence."
+      : c.s.length === 1
+        ? "Touchez maintenant l'endroit où elle s'arrête (touchez près d'un bout pour aller jusqu'au bout)."
+        : `Partie à retirer : ${fmtM(Math.abs(c.s[1] - c.s[0]), 1)} sur ${fmtM(L, 1)}. Le reste est conservé. Touchez à nouveau la ligne pour recommencer.`;
+    $('#rtCoupeOk').disabled = c.s.length < 2 || Math.abs(c.s[1] - c.s[0]) < 0.2;
+  }
 }
 $('#rtRetirer').onclick = () => {
   const o = plan.picc.objets[RT.sel];
@@ -1100,24 +1114,112 @@ $('#rtRetirer').onclick = () => {
 $('#rtFin').onclick = finRetrait;
 document.querySelectorAll('[data-retrait]').forEach((b) => { b.onclick = debutRetrait; });
 
+// ---- Coupe d'une ligne (haie, muret, clôture…) : on ne retire que la partie entre deux points
+const longueurLigne = (g) => g.slice(1).reduce((s, p, i) => s + Math.hypot(p[0] - g[i][0], p[1] - g[i][1]), 0);
+// position du point le plus proche de m sur la ligne, en mètres depuis le début
+function abscisse(g, m) {
+  let best = { s: 0, d: Infinity }, cumul = 0;
+  for (let i = 0; i < g.length - 1; i++) {
+    const [ax, ay] = g[i], [bx, by] = g[i + 1], dx = bx - ax, dy = by - ay, L = Math.hypot(dx, dy);
+    const t = L ? Math.max(0, Math.min(1, ((m.x - ax) * dx + (m.y - ay) * dy) / (L * L))) : 0;
+    const d = Math.hypot(ax + t * dx - m.x, ay + t * dy - m.y);
+    if (d < best.d) best = { s: cumul + t * L, d };
+    cumul += L;
+  }
+  return best;
+}
+// morceau de ligne entre s0 et s1 (en mètres depuis le début)
+function sousLigne(g, s0, s1) {
+  const out = [];
+  let cumul = 0;
+  const point = (i, t) => [Math.round((g[i][0] + (g[i + 1][0] - g[i][0]) * t) * 100) / 100, Math.round((g[i][1] + (g[i + 1][1] - g[i][1]) * t) * 100) / 100];
+  for (let i = 0; i < g.length - 1; i++) {
+    const L = Math.hypot(g[i + 1][0] - g[i][0], g[i + 1][1] - g[i][1]);
+    const a = cumul, b = cumul + L;
+    if (b >= s0 && a <= s1 && L > 0) {
+      if (!out.length) out.push(point(i, Math.max(0, (s0 - a) / L)));
+      out.push(b <= s1 ? g[i + 1] : point(i, (s1 - a) / L));
+    }
+    cumul = b;
+  }
+  return out;
+}
+
+$('#rtCouper').onclick = () => {
+  RT.coupe = { s: [] };
+  majRetrait();
+};
+$('#rtCoupeAnnuler').onclick = () => {
+  RT.coupe = null;
+  carte.setSelPicc(plan.picc.objets[RT.sel] || null);
+  majRetrait();
+};
+function tapCoupe(p, e) {
+  const o = plan.picc.objets[RT.sel];
+  if (!o) return;
+  const m = carte.versMonde(p.x, p.y), L = longueurLigne(o.g);
+  let { s, d } = abscisse(o.g, m);
+  if (d > carte.rayon(e) * 1.5 / carte.vue.s) { $('#rtCoupeAide').textContent = 'Touchez sur la ligne surlignée en rouge.'; return; }
+  if (s < 0.5) s = 0;
+  if (L - s < 0.5) s = L;
+  const c = RT.coupe;
+  if (c.s.length >= 2) c.s = [];
+  c.s.push(s);
+  if (c.s.length === 2) {
+    const [s0, s1] = [...c.s].sort((a, b) => a - b);
+    carte.setSelPicc({ k: o.k, t: 'l', g: sousLigne(o.g, s0, s1) });
+  } else {
+    const [pt] = sousLigne(o.g, s, Math.min(s + 0.01, L));
+    carte.setSelPicc({ k: 'poteau', t: 'p', g: [pt || o.g[0]] });
+  }
+  majRetrait();
+}
+$('#rtCoupeOk').onclick = () => {
+  const o = plan.picc.objets[RT.sel], c = RT.coupe;
+  if (!o || !c || c.s.length < 2) return;
+  const [s0, s1] = [...c.s].sort((a, b) => a - b), L = longueurLigne(o.g);
+  const garde = [s0 > 0.2 ? sousLigne(o.g, 0, s0) : null, L - s1 > 0.2 ? sousLigne(o.g, s1, L) : null].filter((g) => g && g.length >= 2);
+  pousserHisto();
+  const sig = spw.signature(o);
+  plan.picc.objets.splice(RT.sel, 1);
+  plan.picc.objets.push(...garde.map((g) => ({ ...o, g, de: sig })));
+  plan.picc.retires.push({ sig, o, garde, long: Math.round((s1 - s0) * 10) / 10, le: new Date().toISOString() });
+  RT.coupe = null;
+  RT.sel = -1;
+  apresChangementPicc();
+  majRetrait();
+};
+
+// Applique une liste de retraits à des objets SPW : retire chaque objet par sa signature et,
+// pour une coupe, ajoute les morceaux conservés (dans l'ordre, pour les coupes de morceaux).
+function appliquerRetires(objets, liste) {
+  const obj = [...objets], retires = [];
+  for (const r0 of liste) {
+    const r = typeof r0 === 'string' ? { sig: r0 } : r0;   // ancien format de l'historique
+    const i = obj.findIndex((o) => spw.signature(o) === r.sig);
+    if (i < 0) continue;
+    const [o] = obj.splice(i, 1);
+    if (r.garde) obj.push(...r.garde.map((g) => ({ ...o, g, de: r.sig })));
+    retires.push({ sig: r.sig, o, ...(r.garde ? { garde: r.garde, long: r.long } : {}), ...(r.le ? { le: r.le } : {}) });
+  }
+  return { objets: obj, retires };
+}
+// Tous les objets SPW d'origine (affichés + retirés), sans les morceaux issus de coupes
+const objetsComplets = () => [...plan.picc.objets, ...plan.picc.retires.map((r) => r.o)].filter((o) => !o.de);
+const resumeRetires = (l) => l.map(({ sig, garde, long, le }) => ({ sig, ...(garde ? { garde, long } : {}), ...(le ? { le } : {}) }));
+
 function remettre(i) {
   pousserHisto();
-  const [r] = plan.picc.retires.splice(i, 1);
-  plan.picc.objets.push(r.o);
+  const liste = resumeRetires(plan.picc.retires).filter((_, k) => k !== i);
+  Object.assign(plan.picc, appliquerRetires(objetsComplets(), liste));
   apresChangementPicc();
 }
 
-// Après annulation : remet ou retire les objets pour correspondre à la liste voulue
+// Après annulation : reconstruit les objets SPW pour correspondre à la liste voulue
 function retablirRetires(cible) {
-  const avant = plan.picc.retires.map((r) => r.sig).join('|');
-  for (const r of plan.picc.retires.filter((x) => !cible.has(x.sig))) plan.picc.objets.push(r.o);
-  plan.picc.retires = plan.picc.retires.filter((x) => cible.has(x.sig));
-  for (const sig of cible) {
-    if (plan.picc.retires.some((r) => r.sig === sig)) continue;
-    const i = plan.picc.objets.findIndex((o) => spw.signature(o) === sig);
-    if (i >= 0) plan.picc.retires.push({ sig, o: plan.picc.objets.splice(i, 1)[0] });
-  }
-  if (plan.picc.retires.map((r) => r.sig).join('|') !== avant) apresChangementPicc();
+  const avant = JSON.stringify(resumeRetires(plan.picc.retires));
+  Object.assign(plan.picc, appliquerRetires(objetsComplets(), cible));
+  if (JSON.stringify(resumeRetires(plan.picc.retires)) !== avant) apresChangementPicc();
 }
 
 function apresChangementPicc() {
@@ -1137,7 +1239,7 @@ function majRetires() {
     li.className = 'el-ligne';
     li.innerHTML = '<span class="el-txt"><b></b><small></small></span><button class="btn petit" type="button">Remettre</button>';
     li.querySelector('b').textContent = libPicc(r.o);
-    li.querySelector('small').textContent = infoPicc(r.o);
+    li.querySelector('small').textContent = r.garde ? `partie de ${fmtM(r.long, 1)} retirée · ${infoPicc(r.o)}` : infoPicc(r.o);
     li.querySelector('button').onclick = () => remettre(i);
     return li;
   }));
@@ -1277,9 +1379,7 @@ $('#recuAjouter').onclick = async () => {
   try {
     // le fond SPW n'est pas dans le lien : on le recharge, puis on retire à nouveau les éléments disparus
     const objets = await spw.chargerPICC(p.zone, p.origine, (i, n) => { msg.textContent = `Chargement du plan SPW… ${Math.round(i / n * 100)} %`; });
-    const sigs = new Set((p.picc?.retires || []).map((r) => r.sig));
-    const retires = objets.filter((o) => sigs.has(spw.signature(o))).map((o) => ({ sig: spw.signature(o), o }));
-    p.picc = { charge: new Date().toISOString(), objets: objets.filter((o) => !sigs.has(spw.signature(o))), retires };
+    p.picc = { charge: new Date().toISOString(), ...appliquerRetires(objets, p.picc?.retires || []) };
     if (!p.id || await store.lire(p.id)) p.id = store.nouvelId();
     await store.enregistrer(p);
     planRecu = null;

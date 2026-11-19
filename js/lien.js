@@ -41,7 +41,7 @@ async function transformer(donnees, etape) {
 // Plan allégé : sans les objets SPW (ils seront rechargés), avec la liste des éléments retirés
 export function alleger(plan) {
   const { picc, ...reste } = plan;
-  return { ...reste, picc: { charge: picc.charge, objets: [], retires: (picc.retires || []).map((r) => ({ sig: r.sig })) } };
+  return { ...reste, picc: { charge: picc.charge, objets: [], retires: (picc.retires || []).map((r) => (r.garde ? { sig: r.sig, garde: r.garde, long: r.long } : { sig: r.sig })) } };
 }
 
 // Texte à placer après l'adresse du site

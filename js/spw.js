@@ -98,7 +98,8 @@ const r2 = (v) => Math.round(v * 100) / 100;
 export function signature(o) {
   const p = o.t === 'a' ? o.g[0][0] : o.g[0];
   const n = o.t === 'a' ? o.g[0].length : o.g.length;
-  return `${o.k}:${Math.round(p[0] * 10)},${Math.round(p[1] * 10)}:${n}`;
+  const base = `${o.k}:${Math.round(p[0] * 10)},${Math.round(p[1] * 10)}:${n}`;
+  return o.de ? `${base}<${o.de}` : base; // morceau gardé après une coupe : signature distincte de l'original
 }
 
 // Charge les objets PICC dans un carré autour de (cx, cy).

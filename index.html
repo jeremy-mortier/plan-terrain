@@ -150,7 +150,17 @@
         <div class="r-form" id="rtSel" hidden>
           <p class="m-titre"><b id="rtNom"></b></p>
           <p class="aide" id="rtInfo"></p>
-          <div class="rang"><button class="btn primaire" type="button" id="rtRetirer">Retirer du plan</button></div>
+          <div class="rang" id="rtBoutons">
+            <button class="btn primaire" type="button" id="rtRetirer">Retirer du plan</button>
+            <button class="btn" type="button" id="rtCouper">Retirer seulement une partie</button>
+          </div>
+          <div id="rtCoupe" hidden>
+            <p class="aide" id="rtCoupeAide"></p>
+            <div class="rang">
+              <button class="btn primaire" type="button" id="rtCoupeOk" disabled>Retirer cette partie</button>
+              <button class="btn" type="button" id="rtCoupeAnnuler">Annuler</button>
+            </div>
+          </div>
         </div>
       </section>
 
