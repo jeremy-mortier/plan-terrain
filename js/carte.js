@@ -3,7 +3,7 @@
 
 import { dist, projSeg } from './geom.js';
 import { valeur, centre, rotationDe, peutTourner, geometrie, longueurDe } from './releve.js';
-import { coins, local, normRot, estMarche, travees, facade, aFacade, estRemorque, TIMON } from './amenagement.js';
+import { coins, contourObjet, local, normRot, estMarche, travees, facade, aFacade, estRemorque, TIMON } from './amenagement.js';
 
 const NS = 'http://www.w3.org/2000/svg';
 const el = (tag, attrs = {}, parent) => {
@@ -157,7 +157,7 @@ export class Carte {
       const cls = ['am', `cat-${o.cat}`];
       if (i === this.selObj) cls.push('sel');
       if (this.alertesObj.has(o.id)) cls.push('alerte');
-      el('polygon', { points: coins(o).map((p) => `${p.x},${p.y}`).join(' '), class: cls.join(' ') }, g);
+      el('polygon', { points: contourObjet(o).map((p) => `${p.x},${p.y}`).join(' '), class: cls.join(' ') }, g);
       if (estRemorque(o)) {
         // séparation caisse / timon et pointe du timon
         const c = coins(o), t = Math.min(TIMON / o.l, 0.45);

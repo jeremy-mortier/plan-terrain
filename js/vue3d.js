@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import { MapControls } from 'three/addons/controls/MapControls.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { coins, hauteur, estMarche, travees, estRemorque, TIMON } from './amenagement.js';
+import { coins, hauteur, estMarche, travees, estRemorque, TIMON, modeleDe } from './amenagement.js';
 import { valeur } from './releve.js';
 
 const RAYON = 120;              // on ne montre le plan SPW que dans ce rayon (m)
@@ -17,6 +17,8 @@ const COULEURS = {
   scene: 0xe9a996, mobilier: 0xc9c7bb, zone: 0x1d4e89, obstacle: 0x8a8378, autre: 0x9a6fc0,
   tube: 0x5b7472, tole: 0x8e9391, bache: 0x1f3f95, planche: 0x9a7a5c, poteauTente: 0xd2d4d4,
   caisse: 0xf3f4f2, chassis: 0x30373a, pneu: 0x1d2022, groupeFroid: 0x5a6264,
+  boisClair: 0xb48a5e, boisFonce: 0x7d5a3a, tubeGris: 0x8c9396, verreVert: 0x2f7d3a, sombre: 0x24292b,
+  caravane: 0xf1efe9, bandeCaravane: 0x6f8696, vitre: 0x34444f, armoire: 0xb9c0c3, jaune: 0xf2c200,
 };
 
 // Toile rayée rouge et blanc : une paire de bandes par mètre (u en mètres)
@@ -126,15 +128,23 @@ function chapiteau(o, h, materiau) {
   const faite = Math.min(w * 0.35, 2.5), yF = h + faite;
   const ombre = (m) => { m.castShadow = true; m.receiveShadow = true; return m; };
   const pans = [];
-  // toit : deux pans (rayures du faîte vers le bas) + pignons
-  pans.push(quad(P(-w / 2, h, -l / 2), P(-w / 2, h, l / 2), P(0, yF, l / 2), P(0, yF, -l / 2)));
-  pans.push(quad(P(w / 2, h, l / 2), P(w / 2, h, -l / 2), P(0, yF, -l / 2), P(0, yF, l / 2)));
-  for (const z of [-l / 2, l / 2]) {
-    const t = new THREE.BufferGeometry();
-    t.setAttribute('position', new THREE.Float32BufferAttribute([-w / 2, h, z, w / 2, h, z, 0, yF, z], 3));
-    t.setAttribute('uv', new THREE.Float32BufferAttribute([0, 0, w, 0, w / 2, 1], 2));
+  const triangle = (a, b, c) => {
+    const t = new THREE.BufferGeometry(), L = a.distanceTo(b);
+    t.setAttribute('position', new THREE.Float32BufferAttribute([a, b, c].flatMap((p) => [p.x, p.y, p.z]), 3));
+    t.setAttribute('uv', new THREE.Float32BufferAttribute([0, 0, L, 0, L / 2, 1], 2));
     t.computeVertexNormals();
-    pans.push(t);
+    return t;
+  };
+  if (modeleDe(o) === 'tonnelle') {
+    // tonnelle : toit en pyramide à quatre pans
+    const sommet = P(0, h + Math.min(w, l) * 0.28, 0);
+    const c4 = [P(-w / 2, h, -l / 2), P(w / 2, h, -l / 2), P(w / 2, h, l / 2), P(-w / 2, h, l / 2)];
+    for (let i = 0; i < 4; i++) pans.push(triangle(c4[i], c4[(i + 1) % 4], sommet));
+  } else {
+    // chapiteau : toit à deux pans (rayures du faîte vers le bas) + pignons
+    pans.push(quad(P(-w / 2, h, -l / 2), P(-w / 2, h, l / 2), P(0, yF, l / 2), P(0, yF, -l / 2)));
+    pans.push(quad(P(w / 2, h, l / 2), P(w / 2, h, -l / 2), P(0, yF, -l / 2), P(0, yF, l / 2)));
+    for (const z of [-l / 2, l / 2]) pans.push(triangle(P(-w / 2, h, z), P(w / 2, h, z), P(0, yF, z)));
   }
   // côtés fermés, ou simple lambrequin de 30 cm sous la gouttière
   const bas = o.cotes === false ? h - 0.3 : y0;
@@ -252,6 +262,152 @@ function remorque3D(o, h, materiau, semi) {
     // groupe froid sur la face avant
     boite(w * 0.7, 0.6, 0.35, 0, h - 0.45, zAv - 0.17, 'groupeFroid');
   }
+  return g;
+}
+
+// ---------------------------------------------------------------- Petits modèles (taille réglable)
+// Repère local de l'objet : x = largeur, z = longueur (z négatif = côté nord / avant), y = hauteur.
+function boiteDans(g, materiau, mat, [sx, sy, sz], [x, y, z], ombre = true) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(Math.max(sx, 0.01), Math.max(sy, 0.01), Math.max(sz, 0.01)), materiau(mat));
+  m.position.set(x, y, z);
+  m.castShadow = ombre; m.receiveShadow = true;
+  g.add(m);
+  return m;
+}
+
+// Bar carré en bois : comptoir sur les 4 côtés, passage à l'arrière, toit en tôle sur 4 poteaux si assez haut
+function barCarre(o, h, materiau) {
+  const g = new THREE.Group(), w = o.w, l = o.l;
+  const hc = Math.min(1.1, h), d = Math.min(0.6, w / 4, l / 4), pass = Math.min(0.9, l - 2 * d - 0.2);
+  const B = (s, p, mat = 'boisClair') => boiteDans(g, materiau, mat, s, p);
+  // côtés nord et sud (sur toute la largeur)
+  for (const s of [-1, 1]) B([w, hc, d], [0, hc / 2, s * (l / 2 - d / 2)]);
+  // côté avant (+x) plein, côté arrière (−x) avec un passage au milieu
+  const lc = l - 2 * d;
+  B([d, hc, lc], [w / 2 - d / 2, hc / 2, 0]);
+  const lm = (lc - pass) / 2;
+  for (const s of [-1, 1]) if (lm > 0.05) B([d, hc, lm], [-w / 2 + d / 2, hc / 2, s * (pass / 2 + lm / 2)]);
+  // plateaux du comptoir, en bois plus foncé et débordant de 10 cm
+  for (const s of [-1, 1]) B([w + 0.2, 0.05, d + 0.2], [0, hc + 0.025, s * (l / 2 - d / 2)], 'boisFonce');
+  B([d + 0.2, 0.05, lc], [w / 2 - d / 2, hc + 0.025, 0], 'boisFonce');
+  for (const s of [-1, 1]) if (lm > 0.05) B([d + 0.2, 0.05, lm], [-w / 2 + d / 2, hc + 0.025, s * (pass / 2 + lm / 2)], 'boisFonce');
+  // toit sur poteaux d'angle
+  if (h > hc + 0.8) {
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) B([0.1, h, 0.1], [sx * (w / 2 - 0.05), h / 2, sz * (l / 2 - 0.05)], 'boisFonce');
+    const toit = toleOndulee(w, l, h, h - 0.15, materiau, { av: 0.3, ar: 0.3, cote: 0.3 });
+    g.add(toit);
+  }
+  return g;
+}
+
+// Bulle à verre : cylindre vert surmonté d'un dôme, deux ouvertures et un anneau de levage
+function bulleVerre(o, h, materiau) {
+  const g = new THREE.Group();
+  const hb = h * 0.55, hd = Math.max(h - hb, 0.1);
+  const corps = new THREE.Mesh(new THREE.CylinderGeometry(0.49, 0.5, hb, 32), materiau('verreVert'));
+  corps.position.y = hb / 2;
+  const dome = new THREE.Mesh(new THREE.SphereGeometry(0.49, 32, 12, 0, Math.PI * 2, 0, Math.PI / 2), materiau('verreVert'));
+  dome.scale.y = hd / 0.49;
+  dome.position.y = hb;
+  for (const m of [corps, dome]) { m.castShadow = m.receiveShadow = true; g.add(m); }
+  for (const s of [-1, 1]) {
+    const trou = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.03, 20), materiau('sombre'));
+    trou.rotation.z = Math.PI / 2;
+    trou.position.set(s * 0.5, hb * 0.92, 0);
+    g.add(trou);
+  }
+  const anneau = new THREE.Mesh(new THREE.TorusGeometry(0.07, 0.015, 8, 20), materiau('tubeGris'));
+  anneau.position.y = hb + hd + 0.06;
+  g.add(anneau);
+  // la bulle est construite pour 1 m de diamètre, puis mise à la taille voulue (elle peut être ovale)
+  g.scale.set(o.w, 1, o.l);
+  return g;
+}
+
+// Table et bancs brasseur : table au centre, un banc de chaque côté, pieds en tube
+function brasseur(o, h, materiau) {
+  const g = new THREE.Group(), w = o.w, l = o.l;
+  const tw = Math.min(0.5, w * 0.35), bw = Math.min(0.25, w * 0.18), hb = h * 0.62;
+  const B = (s, p, mat) => boiteDans(g, materiau, mat, s, p);
+  B([tw, 0.03, l], [0, h - 0.015, 0], 'boisClair');
+  for (const sz of [-1, 1]) for (const sx of [-1, 1]) B([0.03, h - 0.03, 0.03], [sx * tw * 0.35, (h - 0.03) / 2, sz * (l / 2 - 0.25)], 'tubeGris');
+  for (const sx of [-1, 1]) {
+    const x = sx * (w / 2 - bw / 2);
+    B([bw, 0.03, l * 0.98], [x, hb - 0.015, 0], 'boisClair');
+    for (const sz of [-1, 1]) B([0.03, hb - 0.03, 0.03], [x, (hb - 0.03) / 2, sz * (l / 2 - 0.25)], 'tubeGris');
+  }
+  return g;
+}
+
+// Mange-debout : plateau rond, pied central, socle
+function mangeDebout(o, h, materiau) {
+  const g = new THREE.Group();
+  const plateau = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 0.03, 28), materiau('boisClair'));
+  plateau.scale.set(o.w, 1, o.l);
+  plateau.position.y = h - 0.015;
+  const pied = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, h - 0.03, 12), materiau('tubeGris'));
+  pied.position.y = (h - 0.03) / 2;
+  const socle = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.24, 0.03, 20), materiau('tubeGris'));
+  const s = Math.min(o.w, o.l) / 0.8;
+  socle.scale.set(s, 1, s);
+  socle.position.y = 0.015;
+  for (const m of [plateau, pied, socle]) { m.castShadow = m.receiveShadow = true; g.add(m); }
+  return g;
+}
+
+// Caravane : caisse blanche avec bande, fenêtres, porte côté droit, un essieu, timon vers l'avant (nord)
+function caravane(o, h, materiau) {
+  const g = new THREE.Group(), w = o.w, l = o.l;
+  const lt = Math.min(1.1, l * 0.2), lb = l - lt, zAv = -l / 2 + lt, zc = zAv + lb / 2, yb = 0.45;
+  const B = (s, p, mat, ombre) => boiteDans(g, materiau, mat, s, p, ombre);
+  const caisse = B([w, h - yb, lb], [0, (h + yb) / 2, zc], 'caravane');
+  const ar = new THREE.LineSegments(new THREE.EdgesGeometry(caisse.geometry), new THREE.LineBasicMaterial({ color: 0x7c8588 }));
+  ar.position.copy(caisse.position);
+  g.add(ar);
+  B([w + 0.02, 0.14, lb + 0.02], [0, yb + (h - yb) * 0.35, zc], 'bandeCaravane', false);
+  // fenêtres latérales et avant, porte à droite (+x)
+  const yf = yb + (h - yb) * 0.62, hf = Math.min(0.55, (h - yb) * 0.3);
+  for (const sx of [-1, 1]) for (const f of [0.25, 0.72]) B([0.03, hf, Math.min(0.9, lb * 0.18)], [sx * (w / 2 + 0.005), yf, zAv + lb * f], 'vitre', false);
+  B([w * 0.7, hf, 0.03], [0, yf, zAv - 0.005], 'vitre', false);
+  B([0.03, Math.min(1.8, h - yb - 0.1), 0.62], [w / 2 + 0.01, yb + Math.min(1.8, h - yb - 0.1) / 2, zc + lb * 0.12], 'bandeCaravane', false);
+  // essieu et roues
+  for (const sx of [-1, 1]) {
+    const r = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.18, 18), materiau('pneu'));
+    r.rotation.z = Math.PI / 2;
+    r.position.set(sx * (w / 2 - 0.12), 0.3, zc + lb * 0.05);
+    r.castShadow = true;
+    g.add(r);
+  }
+  // timon en V
+  const pointe = new THREE.Vector3(0, 0.45, -l / 2 + 0.08);
+  for (const sx of [-1, 1]) {
+    const a = new THREE.Vector3(sx * w * 0.3, 0.5, zAv + 0.1), L = a.distanceTo(pointe);
+    const b = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.08, L), materiau('chassis'));
+    b.position.copy(a.clone().add(pointe).multiplyScalar(0.5));
+    b.lookAt(pointe);
+    b.castShadow = true;
+    g.add(b);
+  }
+  B([0.05, 0.45, 0.05], [0, 0.22, -l / 2 + 0.35], 'chassis');
+  return g;
+}
+
+// Armoire électrique : caisson métallique sur pieds, porte en façade (+x), pictogramme jaune, petit auvent
+function armoireElec(o, h, materiau) {
+  const g = new THREE.Group(), w = o.w, l = o.l, yp = Math.min(0.1, h * 0.1);
+  const B = (s, p, mat, ombre) => boiteDans(g, materiau, mat, s, p, ombre);
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) B([0.05, yp, 0.05], [sx * (w / 2 - 0.05), yp / 2, sz * (l / 2 - 0.05)], 'tubeGris');
+  B([w, h - yp - 0.04, l], [0, yp + (h - yp - 0.04) / 2, 0], 'armoire');
+  B([w + 0.06, 0.04, l + 0.06], [0, h - 0.02, 0], 'tubeGris');
+  // joint de porte et poignée
+  B([0.01, (h - yp) * 0.85, 0.01], [w / 2 + 0.005, yp + (h - yp) * 0.48, 0], 'sombre', false);
+  B([0.03, 0.12, 0.02], [w / 2 + 0.015, yp + (h - yp) * 0.5, l * 0.3], 'sombre', false);
+  // triangle « danger électrique »
+  const tri = new THREE.Shape([new THREE.Vector2(-0.09, 0), new THREE.Vector2(0.09, 0), new THREE.Vector2(0, 0.16)]);
+  const t = new THREE.Mesh(new THREE.ShapeGeometry(tri), materiau('jaune', { side: THREE.DoubleSide }));
+  t.rotation.y = Math.PI / 2;
+  t.position.set(w / 2 + 0.012, yp + (h - yp) * 0.72, -l * 0.15);
+  g.add(t);
   return g;
 }
 
@@ -461,6 +617,18 @@ export function ouvrir(conteneur, plan) {
       groupe.add(z);
     } else if (estMarche(o)) {
       groupe.add(standMarche(o, h, materiau));
+    } else if (modeleDe(o) === 'barCarre') {
+      groupe.add(barCarre(o, h, materiau));
+    } else if (modeleDe(o) === 'bulleVerre') {
+      groupe.add(bulleVerre(o, h, materiau));
+    } else if (modeleDe(o) === 'brasseur') {
+      groupe.add(brasseur(o, h, materiau));
+    } else if (modeleDe(o) === 'mangeDebout') {
+      groupe.add(mangeDebout(o, h, materiau));
+    } else if (modeleDe(o) === 'caravane') {
+      groupe.add(caravane(o, h, materiau));
+    } else if (modeleDe(o) === 'armoireElec') {
+      groupe.add(armoireElec(o, h, materiau));
     } else if (o.modele === 'semi' || estRemorque(o)) {
       groupe.add(remorque3D(o, h, materiau, o.modele === 'semi'));
     } else if (o.modele === 'buvette') {

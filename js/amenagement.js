@@ -20,7 +20,8 @@ export const CATEGORIES = {
 export const CATALOGUE = [
   { nom: 'Chapiteau', w: 10, l: 20, h: 3, cat: 'tente' },
   { nom: 'Chapiteau', w: 6, l: 12, h: 2.5, cat: 'tente' },
-  { nom: 'Tonnelle', w: 3, l: 3, h: 2.2, cat: 'tente' },
+  { nom: 'Tonnelle', w: 3, l: 3, h: 2.2, cat: 'tente', modele: 'tonnelle' },
+  { nom: 'Tonnelle 3 × 6', w: 3, l: 6, h: 2.2, cat: 'tente', modele: 'tonnelle' },
   // stands de marché (tubes, tôle ondulée, bâches) : profondeur = largeur, façade ouverte = longueur
   // travee = largeur d'un emplacement en façade
   { nom: 'Stand de marché', w: 3, l: 3, h: 2.3, cat: 'commerce', modele: 'marche', travee: 3 },
@@ -36,7 +37,12 @@ export const CATALOGUE = [
   { nom: 'Toilette', w: 1.2, l: 1.2, h: 2.3, cat: 'sanitaire' },
   { nom: 'Remorque WC', w: 2.3, l: 4, h: 2.8, cat: 'sanitaire' },
   { nom: 'Scène', w: 8, l: 6, h: 1, cat: 'scene' },
-  { nom: 'Table et bancs', w: 1.8, l: 2.2, h: 0.75, cat: 'mobilier' },
+  { nom: 'Table et bancs brasseur', w: 1.7, l: 2.2, h: 0.76, cat: 'mobilier', modele: 'brasseur' },
+  { nom: 'Mange-debout', w: 0.8, l: 0.8, h: 1.1, cat: 'mobilier', modele: 'mangeDebout' },
+  { nom: 'Bar carré en bois', w: 4, l: 4, h: 2.6, cat: 'commerce', modele: 'barCarre' },
+  { nom: 'Caravane', w: 2.3, l: 6.5, h: 2.6, cat: 'technique', modele: 'caravane' },
+  { nom: 'Armoire électrique', w: 0.6, l: 0.4, h: 1.3, cat: 'technique', modele: 'armoireElec' },
+  { nom: 'Bulle à verre', w: 1.5, l: 1.5, h: 1.8, cat: 'obstacle', modele: 'bulleVerre' },
   { nom: 'Poubelle', w: 0.8, l: 0.8, h: 1, cat: 'mobilier' },
   { nom: 'Barrière Heras', w: 0.3, l: 3.5, h: 2, cat: 'mobilier' },
   { nom: 'Accès secours', w: 4, l: 20, h: 0, cat: 'zone' },
@@ -48,6 +54,15 @@ export const CATALOGUE = [
 export const HAUTEUR_CAT = { tente: 2.5, commerce: 2.5, sanitaire: 2.5, technique: 2, scene: 1, mobilier: 1, zone: 0, obstacle: 1.5 };
 // Stand de marché : modèle explicite, ou ancien « Stand » posé avant l'ajout du modèle
 export const estMarche = (o) => o.modele === 'marche' || (o.cat === 'commerce' && /^stand/i.test(o.nom));
+// Modèles reconnus aussi par leur nom (objets posés avant l'ajout du modèle)
+export function modeleDe(o) {
+  if (o.modele) return o.modele;
+  if (/tonnelle/i.test(o.nom)) return 'tonnelle';
+  if (/table et bancs/i.test(o.nom)) return 'brasseur';
+  return null;
+}
+// Objets ronds : dessinés en cercle (ou ellipse) sur le plan
+export const estRond = (o) => ['bulleVerre', 'mangeDebout'].includes(o.modele);
 export const estRemorque = (o) => o.modele === 'remorque' || /remorque frigo/i.test(o.nom);
 export const TIMON = 1.3;
 // Éléments dont un côté est ouvert (façade marquée sur le plan)
@@ -62,6 +77,16 @@ export function facade(o) {
 export const hauteur = (o) => (o.h != null && o.h !== '' ? +o.h : HAUTEUR_CAT[o.cat] ?? 1);
 
 export const normRot = (r) => Math.round((((r % 360) + 360) % 360) * 10) / 10 % 360;
+
+// Contour dessiné sur le plan : le rectangle, ou une ellipse pour les objets ronds
+export function contourObjet(o) {
+  if (!estRond(o)) return coins(o);
+  const a = -o.rot * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
+  return Array.from({ length: 28 }, (_, k) => {
+    const t = k / 28 * 2 * Math.PI, lx = Math.cos(t) * o.w / 2, ly = Math.sin(t) * o.l / 2;
+    return { x: o.x + lx * c - ly * s, y: o.y + lx * s + ly * c };
+  });
+}
 
 // Coins du rectangle, en mètres
 export function coins(o) {

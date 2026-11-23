@@ -93,7 +93,7 @@ function planSVG(plan, opts, N) {
   if (opts.amenagement) {
     const objets = [...plan.amenagement].sort((a, b) => (a.cat === 'zone' ? 0 : 1) - (b.cat === 'zone' ? 0 : 1));
     for (const o of objets) {
-      out.push(`<polygon class="i-am i-cat-${o.cat}" points="${am.coins(o).map(P).join(' ')}"/>`);
+      out.push(`<polygon class="i-am i-cat-${o.cat}" points="${am.contourObjet(o).map(P).join(' ')}"/>`);
       if (am.aFacade(o)) {
         const [a, b] = am.facade(o), c = am.coins(o), n = am.estMarche(o) ? am.travees(o) : 1;
         out.push(`<path class="i-facade" d="M${P(a)}L${P(b)}"/>`);
