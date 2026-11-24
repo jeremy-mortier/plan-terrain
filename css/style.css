@@ -285,12 +285,19 @@ svg.leg { flex: none; overflow: visible; }
 .overlay .cote-bout { fill: #c2185b; stroke: var(--papier); stroke-width: 1.5; pointer-events: none; }
 .overlay .cote-txt { font: 700 12.5px var(--f-chiffre); fill: #c2185b; text-anchor: middle; paint-order: stroke; stroke: var(--papier); stroke-width: 4px; pointer-events: none; }
 @media (prefers-color-scheme: dark) { .overlay .cote-ligne { stroke: #f48fb1; } .overlay .cote-bout { fill: #f48fb1; } .overlay .cote-txt { fill: #f48fb1; } }
+.overlay .cote-sel { stroke: #c2185b; stroke-width: 9; stroke-opacity: .25; stroke-linecap: round; pointer-events: none; }
+.overlay .cote-poignee { fill: var(--papier); stroke: #c2185b; stroke-width: 2.5; pointer-events: none; }
 .flottant.cote-barre { left: 50%; top: 46px; transform: translateX(-50%); z-index: 3; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: center; max-width: calc(100% - 110px); padding: 6px 10px; border-radius: 10px; background: var(--papier); border: 1px solid #c2185b; box-shadow: 0 2px 8px rgba(0, 0, 0, .25); font-size: 13px; }
 .cote-barre b { font: 700 16px var(--f-chiffre); color: #c2185b; }
 .zoom button[aria-pressed="true"] { background: #c2185b; color: #fff; border-color: #c2185b; }
 .cotes-liste { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
 .cotes-liste li { display: flex; align-items: center; gap: 8px; }
-.cotes-liste li span { flex: 1; }
+.cotes-liste li span, .cotes-liste .cote-nom { flex: 1; }
+.cotes-liste .cote-nom { width: auto; height: auto; padding: 4px 6px; text-align: left; color: var(--encre); font-size: 13px; }
+.cotes-liste .cote-nom:hover { color: var(--accent); background: var(--accent-doux); }
+.cotes-liste li.sel { background: var(--accent-doux); border-radius: 6px; }
+.cote-aide { flex-basis: 100%; text-align: center; color: var(--gris); font-size: 11.5px; }
+.cote-aide:empty { display: none; }
 .cotes-liste li b { font-family: var(--f-chiffre); color: #c2185b; }
 .cotes-liste li button { border: 0; background: none; color: var(--gris); font-size: 16px; cursor: pointer; width: 28px; height: 28px; border-radius: 4px; }
 .cotes-liste li button:hover { color: var(--danger); background: var(--danger-doux); }

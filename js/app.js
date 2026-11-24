@@ -168,6 +168,7 @@ function annuler() {
   plan.elements = h.elements;
   plan.amenagement = h.amenagement || [];
   plan.cotes = h.cotes || plan.cotes || [];
+  if (C.sel >= plan.cotes.length) selCote(-1);
   majCotes();
   if (A.sel >= plan.amenagement.length) A.sel = -1;
   retablirRetires(h.retires || []);
@@ -623,7 +624,7 @@ $('#rSupprimer').onclick = supprimerElement;
 // ---------------------------------------------------------------- Outil « Mesurer » : cotes entre deux points
 // Bouton ↔ sur la carte : on touche deux points (ils s'accrochent au plan), la distance s'affiche.
 // « Garder la cote » la laisse sur le plan ; la carte « Cotes » permet de les afficher ou non et de les effacer.
-const C = { actif: false };
+const C = { actif: false, sel: -1 };
 const r3 = (v) => Math.round(v * 1000) / 1000;
 carte.onCote = (a) => tapCote(a);
 
@@ -631,12 +632,30 @@ function outilCote(on) {
   C.actif = on;
   carte.outilCote = on;
   carte.coteTemp = on ? { a: null, b: null } : null;
-  if (!on) carte.setSurvol(null);
+  if (!on) { carte.setSurvol(null); selCote(-1); }
+  if (on && !carte.cotesVisibles && plan?.cotes.length) { plan.cotesVisibles = true; majCotes(); }  // pour pouvoir les toucher
   $('#zMesurer').setAttribute('aria-pressed', on);
   majCoteBarre();
   carte.dessinerOverlay();
 }
+// Sélection d'une cote gardée (pour la déplacer, la modifier ou la supprimer)
+function selCote(i) {
+  C.sel = i;
+  carte.coteSel = i;
+  if (i >= 0) carte.coteTemp = { a: null, b: null };
+  majCoteBarre();
+  majCotes();
+  carte.dessinerOverlay();
+}
+carte.onCoteSel = (i) => selCote(i);
+carte.onCoteModif = (evt) => {
+  if (evt === 'debut') pousserHisto();
+  else if (evt === 'bouge') majCoteBarre();
+  else if (evt === 'fin') { sauver(); majCotes(); majCoteBarre(); }
+};
 function tapCote(a) {
+  // une touche dans le vide quand une cote est sélectionnée : on la désélectionne seulement
+  if (C.sel >= 0) { selCote(-1); return; }
   const t = carte.coteTemp, p = { x: r3(a.x), y: r3(a.y) };
   if (!t.a || t.b) carte.coteTemp = { a: p, b: null };
   else t.b = p;
@@ -646,10 +665,21 @@ function tapCote(a) {
 function majCoteBarre() {
   $('#coteBarre').hidden = !C.actif;
   if (!C.actif) return;
+  const c = plan?.cotes[C.sel];
+  if (c) {
+    $('#coteTxt').textContent = `Cote ${C.sel + 1} :`;
+    $('#coteVal').textContent = fmtM(dist(c.a, c.b), 2);
+    $('#coteGarder').hidden = $('#coteNouv').hidden = true;
+    $('#coteSuppr').hidden = false;
+    $('#coteAide').textContent = 'Glissez un bout pour le déplacer (il s’accroche au plan), ou la ligne pour déplacer toute la cote.';
+    return;
+  }
   const t = carte.coteTemp, fini = t.a && t.b;
   $('#coteTxt').textContent = !t.a ? 'Touchez le premier point' : !fini ? 'Touchez le second point' : 'Distance :';
   $('#coteVal').textContent = fini ? fmtM(dist(t.a, t.b), 2) : '';
   $('#coteGarder').hidden = $('#coteNouv').hidden = !fini;
+  $('#coteSuppr').hidden = true;
+  $('#coteAide').textContent = !t.a && plan?.cotes.length ? 'ou touchez une cote pour la modifier' : '';
 }
 function majCotes() {
   if (!plan) return;
@@ -660,15 +690,30 @@ function majCotes() {
   $('#cotesVis').checked = carte.cotesVisibles;
   $('#cotesListe').replaceChildren(...l.map((c, i) => {
     const li = document.createElement('li');
-    li.innerHTML = '<span></span><b></b><button type="button" title="Effacer cette cote" aria-label="Effacer cette cote">×</button>';
-    li.querySelector('span').textContent = `Cote ${i + 1}`;
+    if (i === C.sel && C.actif) li.className = 'sel';
+    li.innerHTML = '<button type="button" class="cote-nom" title="Modifier cette cote"></button><b></b><button type="button" title="Effacer cette cote" aria-label="Effacer cette cote">×</button>';
+    li.querySelector('.cote-nom').textContent = `Cote ${i + 1}`;
+    li.querySelector('.cote-nom').onclick = () => {
+      if (!C.actif) outilCote(true);
+      selCote(i);
+      const xs = [c.a.x, c.b.x], ys = [c.a.y, c.b.y];
+      carte.cadrer(Math.min(...xs) - 5, Math.min(...ys) - 5, Math.max(...xs) + 5, Math.max(...ys) + 5);
+    };
     li.querySelector('b').textContent = fmtM(dist(c.a, c.b), 2);
-    li.querySelector('button').onclick = () => { pousserHisto(); plan.cotes.splice(i, 1); sauver(); majCotes(); carte.dessinerOverlay(); };
+    li.querySelector('button:last-child').onclick = () => supprimerCote(i);
     return li;
   }));
 }
+function supprimerCote(i) {
+  if (i < 0 || !plan.cotes[i]) return;
+  pousserHisto();
+  plan.cotes.splice(i, 1);
+  sauver();
+  if (C.sel === i) selCote(-1); else if (C.sel > i) selCote(C.sel - 1); else { majCotes(); majCoteBarre(); carte.dessinerOverlay(); }
+}
 $('#zMesurer').onclick = () => outilCote(!C.actif);
 $('#coteFin').onclick = () => outilCote(false);
+$('#coteSuppr').onclick = () => supprimerCote(C.sel);
 $('#coteNouv').onclick = () => { carte.coteTemp = { a: null, b: null }; majCoteBarre(); carte.dessinerOverlay(); };
 $('#coteGarder').onclick = () => {
   const t = carte.coteTemp;
@@ -682,8 +727,8 @@ $('#coteGarder').onclick = () => {
   majCoteBarre();
   carte.dessinerOverlay();
 };
-$('#cotesVis').onchange = () => { plan.cotesVisibles = $('#cotesVis').checked; sauver(); majCotes(); carte.dessinerOverlay(); };
-$('#cotesEffacer').onclick = () => { pousserHisto(); plan.cotes = []; sauver(); majCotes(); carte.dessinerOverlay(); };
+$('#cotesVis').onchange = () => { plan.cotesVisibles = $('#cotesVis').checked; if (!plan.cotesVisibles) selCote(-1); sauver(); majCotes(); carte.dessinerOverlay(); };
+$('#cotesEffacer').onclick = () => { pousserHisto(); plan.cotes = []; selCote(-1); sauver(); majCotes(); carte.dessinerOverlay(); };
 
 // ---------------------------------------------------------------- Mesure par deux distances
 let modeAvantMesure = null;

@@ -438,8 +438,25 @@ export class Carte {
       return;
     }
     if (this.pointeurs.size > 2) return;
-    // outil « Mesurer » : on ne prend aucun objet, une touche pose un point, glisser déplace la carte
-    if (this.outilCote) { this.geste = { type: 'pan', depart: p, dernier: p, bouge: false }; return; }
+    // outil « Mesurer » : on attrape une cote gardée (ses bouts ou toute la cote) ;
+    // sinon une touche pose un point et glisser déplace la carte
+    if (this.outilCote) {
+      const c = this.cotes?.[this.coteSel];
+      if (c && this.cotesVisibles) {
+        for (const k of ['a', 'b']) {
+          const q = this.versEcran(c[k]);
+          if (Math.hypot(q.x - p.x, q.y - p.y) < this.rayon(e) + 4) { this.geste = { type: 'coteBout', k, depart: p, bouge: false }; return; }
+        }
+      }
+      const i = this.coteSous(p, e);
+      if (i >= 0) {
+        if (i !== this.coteSel) this.onCoteSel?.(i);
+        this.geste = { type: 'coteLigne', depart: p, dernier: this.versMonde(p.x, p.y), bouge: false };
+        return;
+      }
+      this.geste = { type: 'pan', depart: p, dernier: p, bouge: false };
+      return;
+    }
     if (this.mode === 'releve' && this.placement && !this.placement.choix) {
       const q = this.versEcran(this.placement.pt);
       if (Math.hypot(q.x - p.x, q.y - p.y) < this.rayon(e) + 14) { this.geste = { type: 'placer', depart: p, bouge: false }; return; }
@@ -527,6 +544,23 @@ export class Carte {
         this.setBrouillon(this.brouillon);
         this.onPlacement?.('bouge');
       }
+    } else if (g.type === 'coteBout' || g.type === 'coteLigne') {
+      if (!g.bouge && Math.hypot(p.x - g.depart.x, p.y - g.depart.y) > 4) { g.bouge = true; this.onCoteModif?.('debut'); }
+      if (g.bouge) {
+        const c = this.cotes[this.coteSel];
+        if (g.type === 'coteBout') {
+          // le bout s'accroche aux coins et aux lignes du plan (sauf avec Maj)
+          const a = e.shiftKey ? this.versMonde(p.x, p.y) : this.accrocher(p.x, p.y, e);
+          c[g.k] = { x: Math.round(a.x * 1000) / 1000, y: Math.round(a.y * 1000) / 1000 };
+          if (!e.shiftKey) this.setSurvol(a);
+        } else {
+          const m = this.versMonde(p.x, p.y), dx = m.x - g.dernier.x, dy = m.y - g.dernier.y;
+          g.dernier = m;
+          for (const k of ['a', 'b']) c[k] = { x: Math.round((c[k].x + dx) * 1000) / 1000, y: Math.round((c[k].y + dy) * 1000) / 1000 };
+        }
+        this.dessinerOverlay();
+        this.onCoteModif?.('bouge');
+      }
     } else if (g.type === 'rotEl') {
       const el = this.elements[g.i], c = this.versEcran(centre(el));
       const pas = e.shiftKey ? 15 : 1;
@@ -595,6 +629,9 @@ export class Carte {
       if (e.pointerType !== 'mouse') this.setSurvol(null);
     }
     if (g.type === 'rotEl' && g.bouge) this.onElement?.('fin', g.i);
+    if (g.type === 'coteBout' || g.type === 'coteLigne') {
+      if (g.bouge) { this.onCoteModif?.('fin'); if (e.pointerType !== 'mouse') this.setSurvol(null); }
+    }
     if (g.type === 'element') {
       if (g.bouge) this.onElement?.('fin', g.cible);
       else this.tap(p, e);   // simple touche : comportement habituel (sélection, point suivant…)
@@ -763,8 +800,26 @@ export class Carte {
     }
   }
 
+  // Cote gardée sous le doigt (index ou -1)
+  coteSous(p, e) {
+    if (!this.cotesVisibles) return -1;
+    let best = -1, bd = this.rayon(e);
+    (this.cotes || []).forEach((c, i) => {
+      const a = this.versEcran(c.a), b = this.versEcran(c.b);
+      const q = projSeg(p, a, b), d = Math.hypot(q.x - p.x, q.y - p.y);
+      if (d < bd) { bd = d; best = i; }
+    });
+    return best;
+  }
+
   // Cotes : celles gardées sur le plan (si affichées) et celle en cours de mesure
   dessinerCotes(o) {
+    const sel = this.outilCote && this.cotesVisibles ? this.cotes?.[this.coteSel] : null;
+    if (sel) {
+      // cote sélectionnée : surlignée, avec une poignée à chaque bout
+      const a = this.versEcran(sel.a), b = this.versEcran(sel.b);
+      el('line', { x1: a.x, y1: a.y, x2: b.x, y2: b.y, class: 'cote-sel' }, o);
+    }
     const liste = this.cotesVisibles ? [...(this.cotes || [])] : [];
     const t = this.coteTemp;
     if (t?.a) liste.push({ a: t.a, b: t.b || (this.survol && this.outilCote ? this.survol : null), temp: true });
@@ -784,6 +839,10 @@ export class Carte {
       const d = Math.hypot(c.b.x - c.a.x, c.b.y - c.a.y);
       el('text', { class: `cote-txt${c.temp ? ' temp' : ''}`, transform: `translate(${(pa.x + pb.x) / 2},${(pa.y + pb.y) / 2}) rotate(${ang}) translate(0,-6)` }, o)
         .textContent = `${fmtNb(Math.round(d * 100) / 100)} m`;
+    }
+    if (sel) for (const k of ['a', 'b']) {
+      const q = this.versEcran(sel[k]);
+      el('circle', { cx: q.x, cy: q.y, r: 7.5, class: 'cote-poignee' }, o);
     }
   }
 
